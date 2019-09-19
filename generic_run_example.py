@@ -69,10 +69,9 @@ eventQueue = lappd.intake(broadcast)
 
 # Build pedestals by queueing 100 soft triggers
 N_pedestalSamples = 100
-pedestalEvents = []
 
 for board in boards:
-
+    
     # (This control packet will be around 1k, so < 1 MTU)
     for i in range(0, N_pedestalSamples):
         board.poke(SOFT_TRIGGER, i)
@@ -81,17 +80,20 @@ for board in boards:
     # to each board.  So instead of 100 packets, we send 1.
     board.transact()
 
+    # Fresh one for this board
+    pedestalEvents = []
+
     # The eventQueue should be full or filling up with of event data for the this board
     try:
-        # Wait at most 1 milisecond to get something
-        event = eventQueue.get(timeout=1e-3)
+        while True:
+            # Wait at most 1 milisecond to get something
+            event = eventQueue.get(timeout=1e-3)
 
-        # Sanity check the event
-        if not event['addr'] == board.dest:
-            print(file=sys.stderr, "Received an event from %s (%s), but expecting only events from %s.  Suspiciously dropping..." % (event['addr'], event['board_id'], board.dest))
-        else:
-            pedestalEvents.append()
-            
+            # Sanity check the event
+            if not event['addr'] == board.dest:
+                print(file=sys.stderr, "Received an event from %s (%s), but expecting only events from %s.  Suspiciously dropping..." % (event['addr'], event['board_id'], board.dest))
+            else:
+                pedestalEvents.append()
     except queue.Empty as e:
 
         # Did we get what we expected?
