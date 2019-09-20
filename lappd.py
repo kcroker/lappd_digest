@@ -164,11 +164,14 @@ class event(object):
             # We've already got some fragments, so add this somewhere
             working_packet = self.channels[packet['channel_id']]
 
-            # Copy it in
+            # This fragment's payload length
+            width = len(packet['payload'])
+            
+            # Copy it in (of course the assumption is equal sized fragments...)
             working_packet['payload'][packet['seq']*width:packet['seq'] * (width+1)] = packet['payload']
 
             # Add to the recovered bytes
-            working_packet['recovered_bytes'] += len(packet['payload'])
+            working_packet['recovered_bytes'] += width
             
         else:
             # This is the first fragment
