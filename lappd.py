@@ -5,20 +5,21 @@
 import bitstruct
 import sys
 import socket
+import random
+import math
 
 # Define the format of a hit packet
-#  HIT_MAGIC (12 bits)
-#  RESOLUTION (4 bits)
+#  HIT_MAGIC (16 bits)
 #  CHANNEL_ID (8 bits)
 #  DRS4_OFFSET (12 bits)
 #  SEQ (4 bits)
-#  HIT_PAYLOAD_SIZE (12 bits, representing byte length of all seq packet payloads)
+#  HIT_PAYLOAD_SIZE (12 bits, representing byte length of all seq packet payloads WITHIN THIS HIT)
 #  RESERVED (4 bits)
 #  TRIGGER_TIMESTAMP_L (32 bits)
 #  PAYLOAD (e.g. ites, so 2^4*512 = 8192 bits = 1024 bytes)
 #  HIT_FOOTER_MAGIC (16 bits)
-hit_fmt = "u12 u4 u8 u12 u4 u12 p4 u32 r8192 u16"
-hitpacker = bitstruct.compile(hit_fmt, ["magic", "resolution", "channel", "drs4_offset", "seq", "payload_size", "trigger_timestamp_l", "payload", "hit_footer_magic"])
+hit_fmt = "u16 u8 u12 u4 u12 p4 u32 r8192 u16"
+hitpacker = bitstruct.compile(hit_fmt, ["magic", "channel", "drs4_offset", "seq", "payload_size", "trigger_timestamp_l", "payload", "hit_footer_magic"])
 globals()['HIT_MAGIC'] = 0x39a
 globals()['HIT_FOOTER_MAGIC'] = 0xd00b
 
@@ -40,59 +41,138 @@ event_fmt = "u16 r48 u3 u1 u1 p3 u16 u16 u8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "pedestal", "is_soft_triggered", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
 
-# if len(sys.argv) == 2:
-#     # Some simple debug: Make a sample event packet
-#     event_packet = {}
-#     event_packet['magic'] = EVT_MAGIC
-#     event_packet['board_id'] = b'\x00\x01\x02\x03\x04\x05'
-#     event_packet['adc_bit_width'] = 4
-#     event_packet['evt_number'] = 5
-#     event_packet['evt_size'] = 2
-#     event_packet['num_hits'] = 3
-#     event_packet['trigger_timestamp_h'] = 0xfedcba98
-#     event_packet['trigger_timestamp_l'] = 0x76543210
-
-#     print(event_packet)
-#     packed = eventpacker.pack(event_packet)
-#     with open("sample_event", 'wb') as w:
-#         w.write(packed)
-
-#     exit(0)
-
-# Only ever run this if its being called directly from the command line
-if len(sys.argv) == 3 and __name__ == '__main__':
-    # Some simple debug: Make a sample hit packet
-    hit_packet = {}
-    hit_packet['magic'] = HIT_MAGIC
-    hit_packet['resolution'] = 4
-    hit_packet['channel'] = 7
-    hit_packet['drs4_offset'] = 512
-    hit_packet['seq'] = 1
-    hit_packet['payload_size'] = 2*512
-    hit_packet['trigger_timestamp_l'] = 0x76543210
-    hit_packet['hit_footer_magic'] = HIT_FOOTER_MAGIC
-    hit_packet['payload'] = bytearray()
-
-    # Make a sine wave
-    import numpy as np
-    import math
-    
-    domain = np.linspace(0, 2*math.pi, 512)
-    ran = [round((math.sin(t) + 1) * (1 << 14)) for t in domain]
-    for r in ran:
-        # val is now an integer
-        hit_packet['payload'].extend(r.to_bytes(2, byteorder='big'))
-    
-    print(hit_packet)
-    packed = hitpacker.pack(hit_packet)
-    with open("sample_hit", 'wb') as w:
-        w.write(packed)
-
-    exit(0)
-
 # Define an event class
 class event(object):
 
+    #
+    # This generates hits, for testing
+    # (Domain is assumed to be [0,1] for the function
+    #  so make sure to use a lambda to rescale things to that domain)
+    #
+    def generateHit(event, chan, offset, amplitudes):
+
+        #
+        # Set a maximum payload size in bytes
+        #
+        ########################################3
+        mtu = 1400
+
+        # Make sure that amplitudes makes sense for encoding
+        remainder = 0
+        if event.resolution > 3:
+            remainder = len(amplitudes) % (1 << (event.resolution - 3))
+        elif event.resolution < 3:
+            # If compressed amplitudes will not fill out a full byte, pad
+            remainder = len(amplitudes) % (1 >> (3 - event.resolution))
+
+        # Pad with additional amplitudes, if necessary
+        if remainder:
+            amplitudes.extend([0]*remainder)
+
+        # Compute the (total_)hit_payload_size and required number of fragments
+        hit_payload_size = len(amplitudes) * 2**(event.resolution - 3)
+
+        # Sanity check that this is an integer
+        if not isinstance(hit_payload_size, int):
+            raise ValueError("You computed padding wrong, hit_payload_size stopped being an integer")
+
+        # Determine how many fragments we need and the length of the last fragment
+        num_fragments = math.ceil(hit_payload_size / mtu)
+        final_fragment_length = hit_payload_size - (num_fragments-1)*mtu
+        
+        # Sanity check
+        if final_fragment_length >= mtu:
+            raise Exception("Something is insane in fragment payload size computations")
+
+        # Make the total payload as a byte array
+        total_payload = bytearray(hit_payload_size)
+        
+        # [We use hasattr() here because the code reads better than "if not event.unpacker"]
+        if not hasattr(event, 'unpacker'):
+
+            # How many bytes do we get for each amplitude?
+            mul = 1 << (event.resolution - 3)
+
+            # We are doing explosion (or just endian-flip)
+            for i,ampl in enumerate(amplitudes):
+                total_payload[i*mul:(i+1)*mul] = ampl.to_bytes(mul, byteorder='big')
+        else:
+
+            # We are doing compression
+            j = 0
+            mul = 1 << (3 - event.resolution)
+            for i in range(0, len(amplitudes) >> (3 - event.resolution)):
+
+                # This should contain a single byte when done
+                compressed = event.unpacker.pack(amplitudes[i*mul:(i+1)*mul])
+                total_payload[j] = compressed[0]
+                j += 1
+            
+        # Okay, we now have a payload.
+        # Build the hit, splitting the payload into fragments
+        fragment = {}
+
+        # Set things that are common to all fragments
+        fragment['magic'] = HIT_MAGIC
+        fragment['resolution'] = event.resolution
+        fragment['trigger_timestamp_l'] = event.raw_packet['trigger_timestamp_l']
+        fragment['channel'] = chan
+        fragment['drs4_offset'] = offset
+        fragment['hit_payload_size'] = hit_payload_size
+        fragment['hit_footer_magic'] = HIT_FOOTER_MAGIC
+
+        # Now populate individual fragments
+        for i in range(0, num_fragments - 1):
+            fragment['seq'] = i
+            fragment['payload'] = total_payload[i*mtu:(i+1)*mtu]
+            fragments.append(fragment)
+
+        # And do the final fragment
+        fragment['seq'] = i
+        fragment['payload'] = total_payload[i*mtu:i*mtu + final_fragment_length]
+        fragments.append(fragment)
+
+        # Return the list of fragments
+        return fragments
+
+    #
+    # This generates an event, for testing
+    #
+    def generateEvent(event_number, resolution, chan_list, offset_list, amplitudes_list):
+
+        # Make a dummy event
+        event_packet = {}
+        event_packet['magic'] = EVT_MAGIC
+        event_packet['board_id'] = b'\x00\x01\x02\x03\x04\x05'
+        event_packet['adc_bit_width'] = resolution
+        event_packet['evt_number'] = event_number
+        event_packet['evt_size'] = 0
+        event_packet['num_hits'] = len(chan_list)
+        event_packet['trigger_timestamp_h'] = 0xfedcba98
+        event_packet['trigger_timestamp_l'] = random.getrandbits(32)
+
+        # Generate the event object
+        # (we do this since it makes the bit packer/unpacker for us)
+        testEvent = event(event_packet)
+            
+        # Now generate the hits
+        hitPackets = []
+
+        for chan, offset, amplitudes in zip(chan_list, offset_list, amplitudes_list):
+
+            # We use extend() because event.generateHit(...) possibly returns a list of
+            # hit fragments
+            hitPackets.extend(event.generateHit(testEvent, chan, offset, amplitudes))
+
+            # See how much size this added to the event
+            # any fragment will work, so use the last one
+            event_packet['evt_size'] += hitPackets[-1]['hit_payload_size']
+
+        # We will return *packed* packets in LIFO order.
+        # Later, we can scramble the order elsewhere to make sure out of order arrivals are handled
+        # correctly.
+        return [hitpacket.pack(x) for x in hitPackets].append(eventpacker.pack(event_packet))
+        
     def __init__(self, packet):
 
         # Store a reference to the packet
@@ -109,13 +189,6 @@ class event(object):
 
         # How many hits am I expecting?
         self.remaining_hits = packet['num_hits']
-
-        # How big should each hit be, once defragmented?
-        self.hitsize = packet['evt_size'] / self.hitcount
-
-        # Sanity check that this was an integer division
-        if not isinstance(self.hitsize, int):
-            raise Exception("Received an event where the total size of the event did not divide evenly by the number of hits.")
 
         # Has all of my data arrived?
         self.complete = False
@@ -145,7 +218,7 @@ class event(object):
         if self.resolution < 4:
             # Then we only need to look at a byte at a time
             self.chunks = 1
-            self.unpacker = bistruct.compile(" ".join(["u%d" % (1 << self.resolution)] * (8 >> self.resolution)))
+            self.unpacker = bitstruct.compile(" ".join(["u%d" % (1 << self.resolution)] * (8 >> self.resolution)))
         else:
             # Then we need to be gluing bytes together
             self.chunks = 1 << (self.resolution - 3)
@@ -155,6 +228,14 @@ class event(object):
     #
     def claim(self, packet):
 
+        # XXX
+        # A sequences of fragments will have payloads
+        #  { [0, mtu], [mtu, 2*mtu], ..., [N*mtu, remainder] }
+        #
+        # So we need at least two (distinct!) fragments for high resolution packets
+        # before we can determine what the correct overall payload length is
+        #
+        
         # Set up a working packet reference
         working_packet = None
         
@@ -167,7 +248,8 @@ class event(object):
             # This fragment's payload length
             width = len(packet['payload'])
             
-            # Copy it in (of course the assumption is equal sized fragments...)
+            # Copy it in
+            #  --> Assumption: equal sized fragments except for the final one...
             working_packet['payload'][packet['seq']*width:packet['seq'] * (width+1)] = packet['payload']
 
             # Add to the recovered bytes
@@ -179,7 +261,8 @@ class event(object):
             working_packet = packet
             
             # Are we expecting more packets?
-            if len(packet['payload']) < self.hitsize:
+            # While defragmenting, we are working with possibly compressed payloads and lengths
+            if len(packet['payload']) < packet['hit_payload_size']:
 
                 # Yes.  So resize this packet's payload so we can accommodate
                 # the entire thing.
@@ -189,7 +272,7 @@ class event(object):
                 width = len(tmp)
                 
                 # Overwrite
-                packet['payload'] = bytearray(self.hitsize)
+                packet['payload'] = bytearray(packet['hit_payload_size'])
 
                 # Copy the incoming packet's data into the right place
                 packet['payload'][packet['seq']*width:packet['seq'] * (width+1)] = tmp
@@ -197,10 +280,10 @@ class event(object):
                 # Note how many bytes we've already reassembled
                 packet['recovered_bytes'] = width
             else:
-                packet['recovered_bytes'] = self.hitsize
+                packet['recovered_bytes'] = packet['hit_payload_size']
 
         # Did we complete a hit reconstruction with this packet?
-        if working_packet['recovered_bytes'] == self.hitsize:
+        if working_packet['recovered_bytes'] == working_packet['hit_payload_size']:
 
             # Yes.  So now unpack the data
             self.unpackHit(working_packet)
@@ -291,7 +374,7 @@ def intake(listen_tuple, eventQueue):
                         event.claim(packet)
 
                         # Did we complete one?
-                        if is event.complete:
+                        if event.complete:
 
                             # OOO
                             # Push the payload completed event onto the queue
