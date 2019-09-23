@@ -164,43 +164,24 @@ while(True):
         print("# %s" % detection)
     
         # Apply the appropriate pedestal to each event
-        for event in detection:
+        for anevent in detection:
 
             # I think I want to adjust the returned boards from discover()
             # to be a hash on their DNAs
             # (Right now, this way to index won't work)
             #event['subtracted'] = board[event['board_id']].pedestals.subtract(event)
             pass
-    
-        # Get the length of any particular event
-        #
-        # --> XXX Will different boards have different ROIs?
-        #
-        samples = len(detection[0]['payload'])
-    
+
         # Dump the entire detection in ASCII
-    
-        # Build a table for outputting, each board in a column
-        data_table = {}
-        for i in range(0, samples):
-            data_table[i] = []
-
-        # Populate the table
-        for event in detection:
-            for offset, amplitude in enumerate(event['payload']):
-                data_table[offset].append(amplitude)
-
-        # Output the table
-        for offset, amplitudes in data_table.items():
-            print("%d " % offset, end='')
-            for amplitude in amplitudes:
-                print("%d " % amplitude, end='')
-
-                # End the line
-                print("")
-
+        for channel, packet in anevent.channels.items():
+            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d" % (anevent.eventNumber, channel, packet['drs4_offset'], len(packet['payload'])))
+            for t, ampl in enumerate(packet['payload']):
+                print("%d %d" % (t, ampl))
+            print("")
+        
         # End this detection (because \n, this will have an additional newline)
-        print("# END OF DETECTION\n")
+        print("# END OF DETECTION")
     
     except Exception as e:
-        print(e)
+        import traceback
+        traceback.print_exc(file=sys.stderr)
