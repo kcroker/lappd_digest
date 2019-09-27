@@ -98,20 +98,17 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #     s.send(packet)
 
 #
-# XXX
-#   div by zero in the generator, which suggests that the receiving code will
-#   also be broken
-#
 # TEST 4 -
 #   One channel
 #   Bit compression (4 bit resolution, so 2^2)
 #   No fragmentation (payload fits within an 1400 byte MTU)
 #
+# --> PASSED
 ############################################
-run = linearTestEvent(1, 2048, 2)
+# run = linearTestEvent(1, 2048, 2)
 
-for packet in run:
-    s.send(packet)
+# for packet in run:
+#     s.send(packet)
 
 ################## SPANNING TESTS
 
@@ -154,14 +151,15 @@ for packet in run:
 #     s.send(packet)
 
 # TEST 8 -
-#   One channel
+#   Three channels
 #   Byte packing (4 bit resolution, so 2^2)
 #   Fragmentation
 #
+# --> PASSED
 ############################################
-# run = linearTestEvent(1, 3749, 2)
+run = linearTestEvent(3, 5749, 2)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 

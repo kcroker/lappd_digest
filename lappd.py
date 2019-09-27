@@ -366,7 +366,9 @@ class event(object):
 
             # We are unpacking bits (or making single u8s)
             for i in range(0, len(packet['payload'])):
-                amplitudes = self.unpacker.unpack(packet['payload'][i])
+                # Notice that we do an [i:i+1] slide, instead of an index.
+                # The index would return an integer, but the slice returns a bytes object with a single byte.
+                amplitudes = self.unpacker.unpack(packet['payload'][i:i+1])
                 for ampl in amplitudes:
                     tmp.append(ampl)
 
@@ -473,6 +475,7 @@ def intake(listen_tuple, eventQueue):
                     packet = eventpacker.unpack(data)
                     if not packet['magic'] == EVT_MAGIC:
                         print("Received packet could not be parsed as either an event packet or a hit packet.  Dropping.", file=sys.stderr)
+                        print(packet, file=sys.stderr)
                         continue
                     else:
                         print("Received an event", file=sys.stderr)
