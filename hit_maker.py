@@ -58,6 +58,8 @@ if len(sys.argv) < 3:
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 
+########################### CHANNELS
+
 #
 # TEST 1 -
 #   Single channel
@@ -66,10 +68,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(1, 1024, 3)
+run = linearTestEvent(1, 1024, 3)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 #
 # TEST 2 -
@@ -79,10 +81,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(2, 1024, 3)
+run = linearTestEvent(2, 1024, 3)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 #
 # TEST 3 -
@@ -92,10 +94,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(3, 1024, 3)
+run = linearTestEvent(3, 1024, 3)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 #
 # TEST 4 -
@@ -105,10 +107,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(1, 2048, 2)
+run = linearTestEvent(1, 2048, 2)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 ################## SPANNING TESTS
 
@@ -119,10 +121,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(1, 512, 4)
+run = linearTestEvent(1, 512, 4)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 # TEST 6 -
 #   Three channels
@@ -131,10 +133,10 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-# run = linearTestEvent(3, 512, 4)
+run = linearTestEvent(3, 512, 4)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 #################### FRAGMENTATION
 
@@ -145,15 +147,15 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED 
 ############################################
-# run = linearTestEvent(2, 4000, 4)
+run = linearTestEvent(2, 4000, 4)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 # TEST 8 -
 #   Three channels
 #   Byte packing (4 bit resolution, so 2^2)
-#   Fragmentation
+#   Fragmentation, with non-zero remainder
 #
 # --> PASSED
 ############################################
@@ -162,4 +164,26 @@ run = linearTestEvent(3, 5749, 2)
 for packet in run:
     s.send(packet)
 
+# TEST 9 -
+#   One channel
+#   Byte spanning (32 bit resolution, 2^5)
+#   Fragmentation, 0 remainder
+#
+# --> PASSED
+###########################################
+run = linearTestEvent(1, 700, 5)
 
+for packet in run:
+    s.send(packet)
+
+# TEST 10 -
+#   One channel
+#   Byte packing (2 bit resolution, so 2^1)
+#   Fragmentation, 0 remainder
+#
+# --> PASSED
+#############################################
+run = linearTestEvent(1, 1400*8, 1)
+
+for packet in run:
+    s.send(packet)

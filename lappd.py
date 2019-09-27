@@ -80,11 +80,11 @@ class event(object):
             raise ValueError("You computed padding wrong, hit_payload_size stopped being an integer")
 
         # Determine how many fragments we need and the length of the last fragment
-        num_fragments = math.floor(hit_payload_size / LAPPD_MTU) + 1
+        num_fragments = math.ceil(hit_payload_size / LAPPD_MTU)
         final_fragment_length = hit_payload_size - (num_fragments-1)*LAPPD_MTU
         
         # Sanity check
-        if final_fragment_length >= LAPPD_MTU:
+        if final_fragment_length > LAPPD_MTU:
             raise Exception("Something is insane in fragment payload size computations")
         
         # Make the total payload as a byte array
@@ -264,10 +264,18 @@ class event(object):
     def claim(self, packet):
 
         print("Claiming a hit from %s with timestamp %d" % (packet['addr'], packet['trigger_timestamp_l']), file=sys.stderr)
-        
+
+        # Sanity check the length
+        if len(packet['payload']) == 0:
+            
+            # Raise an exception with the bad packet attached
+            e = Exception("Received an empty payload...")
+            e.packet = packet
+            raise e
+
         # Set up a working packet reference
         working_packet = None
-        
+
         # Route this hit to the appropriate channel
         if packet['channel_id'] in self.channels:
 
@@ -278,7 +286,7 @@ class event(object):
 
             # This fragment's payload length
             width = len(packet['payload'])
-            
+
             # Copy it in
             if width < LAPPD_MTU:
                 # We received the last one
@@ -295,7 +303,7 @@ class event(object):
             # This is the first fragment
             self.channels[packet['channel_id']] = packet
             working_packet = packet
-     
+
             # Are we expecting more packets?
             # While defragmenting, we are working with possibly compressed payloads and lengths
             if len(packet['payload']) < packet['hit_payload_size']:
@@ -332,7 +340,6 @@ class event(object):
             print("Attempting to unpack %d bytes of payload" % len(working_packet['payload']), file=sys.stderr)
             self.unpackHit(working_packet)
             
-
             # Track that we finished one of the expected hits
             self.remaining_hits -= 1
             
