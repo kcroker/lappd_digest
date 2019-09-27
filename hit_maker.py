@@ -107,12 +107,11 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #   Bit compression (4 bit resolution, so 2^2)
 #   No fragmentation (payload fits within an 1400 byte MTU)
 #
-# --> FAILED
 ############################################
-# run = linearTestEvent(1, 1024, 2)
+run = linearTestEvent(1, 2048, 2)
 
-# for packet in run:
-#     s.send(packet)
+for packet in run:
+    s.send(packet)
 
 ################## SPANNING TESTS
 
@@ -143,14 +142,26 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #################### FRAGMENTATION
 
 # TEST 7 -
-#   One channel
+#   Two channels
 #   Byte spanning (16 bit resolution, so 2^4)
 #   Fragmentation, with non-zero remainder
-#     (4096 is maximum samples for u12, but this can be adjusted in the header)
-# 
+#
+# --> PASSED 
 ############################################
-run = linearTestEvent(1, 4000, 4)
+# run = linearTestEvent(2, 4000, 4)
 
-for packet in run:
-    s.send(packet)
+# for packet in run:
+#     s.send(packet)
+
+# TEST 8 -
+#   One channel
+#   Byte packing (4 bit resolution, so 2^2)
+#   Fragmentation
+#
+############################################
+# run = linearTestEvent(1, 3749, 2)
+
+# for packet in run:
+#     s.send(packet)
+
 

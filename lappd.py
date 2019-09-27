@@ -13,13 +13,12 @@ import math
 #  CHANNEL_ID (8 bits) (1 byte)
 #  DRS4_OFFSET (12 bits) (1.5 bytes)
 #  SEQ (4 bits) (0.5 bytes) 
-#  HIT_PAYLOAD_SIZE (12 bits, representing byte length of all seq packet payloads WITHIN THIS HIT) (1.5 bytes)
-#  RESERVED (4 bits) (0.5 bytes)
+#  HIT_PAYLOAD_SIZE (16 bits, representing byte length of all seq packet payloads WITHIN THIS HIT) (1.5 bytes)
 #  TRIGGER_TIMESTAMP_L (32 bits) (4 bytes)
 # ------------------------------------ (bitstruct for the above fixed header, 11 bytes)
 #  PAYLOAD (arbitrary, but less than an Ethernet MTU for sure)
 #  HIT_FOOTER_MAGIC (16 bits)
-hit_fmt = "u16 u8 u12 u4 u12 p4 u32"
+hit_fmt = "u16 u8 u12 u4 u16 u32"
 hitpacker = bitstruct.compile(hit_fmt, ["magic", "channel_id", "drs4_offset", "seq", "hit_payload_size", "trigger_timestamp_l"])
 globals()['HIT_MAGIC'] = 0x39a
 globals()['HIT_FOOTER_MAGIC'] = 0xd00b
@@ -43,21 +42,20 @@ event_fmt = "u16 r48 u3 p5 u16 u16 u8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
 
+
+#
+# Set a maximum payload size in bytes
+#
+########################################3
+globals()['LAPPD_MTU'] = 1400
+
 # Define an event class
 class event(object):
 
     #
     # This generates hits, for testing
-    # (Domain is assumed to be [0,1] for the function
-    #  so make sure to use a lambda to rescale things to that domain)
     #
     def generateHit(event, chan, offset, amplitudes):
-
-        #
-        # Set a maximum payload size in bytes
-        #
-        ########################################3
-        mtu = 1400
 
         # Make sure that amplitudes makes sense for encoding
         remainder = 0
@@ -65,31 +63,34 @@ class event(object):
             remainder = len(amplitudes) % (1 << (event.resolution - 3))
         elif event.resolution < 3:
             # If compressed amplitudes will not fill out a full byte, pad
-            remainder = len(amplitudes) % (1 >> (3 - event.resolution))
+            remainder = (len(amplitudes) * 2**event.resolution) % 8
 
         # Pad with additional amplitudes, if necessary
         if remainder:
             amplitudes.extend([0]*remainder)
 
         # Compute the (total_)hit_payload_size and required number of fragments
-        hit_payload_size = len(amplitudes) * 2**(event.resolution - 3)
+        if event.resolution >= 3:
+            hit_payload_size = len(amplitudes) << (event.resolution - 3)
+        else:
+            hit_payload_size = len(amplitudes) >> (3 - event.resolution)
 
         # Sanity check that this is an integer
         if not isinstance(hit_payload_size, int):
             raise ValueError("You computed padding wrong, hit_payload_size stopped being an integer")
 
         # Determine how many fragments we need and the length of the last fragment
-        num_fragments = math.floor(hit_payload_size / mtu) + 1
-        final_fragment_length = hit_payload_size - (num_fragments-1)*mtu
+        num_fragments = math.floor(hit_payload_size / LAPPD_MTU) + 1
+        final_fragment_length = hit_payload_size - (num_fragments-1)*LAPPD_MTU
         
         # Sanity check
-        if final_fragment_length >= mtu:
+        if final_fragment_length >= LAPPD_MTU:
             raise Exception("Something is insane in fragment payload size computations")
         
         # Make the total payload as a byte array
         total_payload = bytearray(hit_payload_size)
         
-        # [We use hasattr() here because the code reads better than "if not event.unpacker"]
+        # [We use hasattr() here because the code reads better than "if not event.unpacker or trying to catch some weird language exception"]
         if not hasattr(event, 'unpacker'):
 
             # How many bytes do we get for each amplitude?
@@ -124,17 +125,27 @@ class event(object):
         fragment['drs4_offset'] = offset
         fragment['hit_payload_size'] = hit_payload_size
 
+        #import pdb
+        #pdb.set_trace()
+        
         # Now populate individual fragments
         # Gotta reset i, because if we never enter the loop, then i never changes
         i = 0
-        for i in range(0, num_fragments - 1):
-            fragment['seq'] = i
-            fragment['payload'] = total_payload[i*mtu:(i+1)*mtu]
-            fragments.append(fragment)
+        for i in range(0, num_fragments-1):
+
+            # Note that we have to make an explicit copy
+            # or else we just keep rewriting the same object
+            tmp = fragment.copy()
+            tmp['seq'] = i
+            tmp['payload'] = total_payload[i*LAPPD_MTU:(i+1)*LAPPD_MTU]
+            fragments.append(tmp)
 
         # And do the final fragment
+        if num_fragments > 1:
+            i += 1
+            
         fragment['seq'] = i
-        fragment['payload'] = total_payload[i*mtu:i*mtu + final_fragment_length]
+        fragment['payload'] = total_payload[i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
         fragments.append(fragment)
 
         # Return the list of fragments
@@ -168,7 +179,7 @@ class event(object):
             # We use extend() because event.generateHit(...) possibly returns a list of
             # hit fragments
             hitPackets.extend(event.generateHit(testEvent, chan, offset, amplitudes))
-
+            
             # See how much size this added to the event
             # any fragment will work, so use the last one
             event_packet['evt_size'] += hitPackets[-1]['hit_payload_size']
@@ -179,17 +190,23 @@ class event(object):
 
         # Make the bytes for the hit packets
         for packet in hitPackets:
+
+            #import pdb
+            #pdb.set_trace()
+
+            print("Encoding fragment %d, channel %d" % (packet['seq'], packet['channel_id']))
+            
             # Slice the header into the front
             packet['payload'][:0] = hitpacker.pack(packet)
 
             # Put the footer on the end
             packet['payload'].extend(HIT_FOOTER_MAGIC.to_bytes(2, byteorder='big'))
 
-        packets = [x['payload'] for x in hitPackets]
+        raw_packets = [x['payload'] for x in hitPackets]
 
         # Make the bytes for the event
-        packets.append(eventpacker.pack(event_packet))
-        return packets
+        raw_packets.append(eventpacker.pack(event_packet))
+        return raw_packets
             
     def __init__(self, packet):
 
@@ -233,12 +250,12 @@ class event(object):
         # OOO We should turn this into a factory, so this is only ever
         # compiled once...
         #
-        if self.resolution < 4:
+        if self.resolution < 3:
             # Then we only need to look at a byte at a time
-            self.chunks = 1
+            self.chunks = 0
             self.unpacker = bitstruct.compile(" ".join(["u%d" % (1 << self.resolution)] * (8 >> self.resolution)))
         else:
-            # Then we need to be gluing bytes together
+            # Then we need to be gluing bytes together (or copying)
             self.chunks = 1 << (self.resolution - 3)
 
     #
@@ -246,7 +263,7 @@ class event(object):
     #
     def claim(self, packet):
 
-        print("Attempting to claim a hit from %s with timestamp %d" % (packet['addr'], packet['trigger_timestamp_l']), file=sys.stderr)
+        print("Claiming a hit from %s with timestamp %d" % (packet['addr'], packet['trigger_timestamp_l']), file=sys.stderr)
         
         # Set up a working packet reference
         working_packet = None
@@ -254,7 +271,7 @@ class event(object):
         # Route this hit to the appropriate channel
         if packet['channel_id'] in self.channels:
 
-            print("Hit routed to existing channel %d" % packet['channel_id'], file=sys.stderr)
+            print("Hit fragment %d routed to existing channel %d" % (packet['seq'], packet['channel_id']), file=sys.stderr)
             
             # We've already got some fragments, so add this somewhere
             working_packet = self.channels[packet['channel_id']]
@@ -263,19 +280,22 @@ class event(object):
             width = len(packet['payload'])
             
             # Copy it in
-            #  --> Assumption: equal sized fragments except for the final one...
-            working_packet['payload'][packet['seq']*width:packet['seq'] * (width+1)] = packet['payload']
+            if width < LAPPD_MTU:
+                # We received the last one
+                working_packet['payload'][packet['seq']*LAPPD_MTU:packet['seq']*LAPPD_MTU + width] = packet['payload']
+            else:
+                working_packet['payload'][packet['seq']*LAPPD_MTU:(packet['seq'] + 1)*LAPPD_MTU] = packet['payload']
 
-            # Add to the recovered bytes
+                # Add to the recovered bytes
             working_packet['recovered_bytes'] += width
             
         else:
-            print("Hit establishing data for channel %d" % packet['channel_id'], file=sys.stderr)
+            print("Hit establishing data for channel %d, via fragment %d" % (packet['channel_id'], packet['seq']), file=sys.stderr)
 
             # This is the first fragment
             self.channels[packet['channel_id']] = packet
             working_packet = packet
-            
+     
             # Are we expecting more packets?
             # While defragmenting, we are working with possibly compressed payloads and lengths
             if len(packet['payload']) < packet['hit_payload_size']:
@@ -291,20 +311,27 @@ class event(object):
                 packet['payload'] = bytearray(packet['hit_payload_size'])
 
                 # Copy the incoming packet's data into the right place
-                packet['payload'][packet['seq']*width:packet['seq'] * (width+1)] = tmp
-
+                if width < LAPPD_MTU:
+                    # Then its the last position
+                    packet['payload'][packet['seq']*LAPPD_MTU:packet['seq']*LAPPD_MTU + width] = tmp
+                else:
+                    packet['payload'][packet['seq']*LAPPD_MTU:(packet['seq'] + 1)*LAPPD_MTU] = tmp
+                    
                 # Note how many bytes we've already reassembled
                 packet['recovered_bytes'] = width
             else:
                 packet['recovered_bytes'] = packet['hit_payload_size']
+               
 
         # Did we complete a hit reconstruction with this packet?
         if working_packet['recovered_bytes'] == working_packet['hit_payload_size']:
 
             print("Hit reassembled!", file=sys.stderr)
-            
+
             # Yes.  So now unpack the data
+            print("Attempting to unpack %d bytes of payload" % len(working_packet['payload']), file=sys.stderr)
             self.unpackHit(working_packet)
+            
 
             # Track that we finished one of the expected hits
             self.remaining_hits -= 1
@@ -324,21 +351,27 @@ class event(object):
     # of amplitudes, using this event's resolution to get the widths.
     #
     def unpackHit(self, packet):
-        tmp = []
+        tmp = None
 
         # See if we are gluing bytes into integers
         # or unpacking bits into integers
-        if self.chunks >= 1:
-            for i in range(0, len(packet['payload']) >> (self.resolution - 3)):
-                # Each byte here is expected to be in MSB order....
-                tmp.append(int.from_bytes(packet['payload'][i*self.chunks:(i+1)*self.chunks], byteorder='big'))
+        if self.chunks > 0:
+
+            # Populate the list
+            tmp = [int.from_bytes(packet['payload'][i*self.chunks:(i+1)*self.chunks], byteorder='big') for i in range(0, len(packet['payload']) >> (self.resolution - 3))]
         else:
+            # OOO
+            # We should technically do a computation here too and not use append...
+            tmp = []
+
             # We are unpacking bits (or making single u8s)
             for i in range(0, len(packet['payload'])):
                 amplitudes = self.unpacker.unpack(packet['payload'][i])
                 for ampl in amplitudes:
                     tmp.append(ampl)
 
+        print(tmp, file=sys.stderr)
+        
         # tmp now contains the unpacked amplitudes as integers
         # Replace the raw payload
         packet['payload'] = tmp
@@ -385,6 +418,7 @@ def intake(listen_tuple, eventQueue):
             # Try to unpack it as a hit first
             packet = None
             try:
+                # Get the hit header into the packet
                 packet = hitpacker.unpack(data)
                 if not packet['magic'] == HIT_MAGIC:
                     packet = None
@@ -400,6 +434,8 @@ def intake(listen_tuple, eventQueue):
                     # Do we have an event to associate this with?
                     if tag in currentEvents:
 
+                        print("Event exists for %s at %d, claiming." % tag, file=sys.stderr)
+                        
                         # We do.  Claim this hit
                         myevent = currentEvents[tag]
 
@@ -426,9 +462,10 @@ def intake(listen_tuple, eventQueue):
                         orphanedHits.append(packet)
 
                         # Notify.
-                        print("Orphaned HIT received from %s with timestamp %d" % tag, file=sys.stderr)
-            except:
-                pass
+                        print("Orphaned HIT fragment %d, channel %d, received from %s with timestamp %d" % (packet['seq'], packet['channel_id'], *tag), file=sys.stderr)
+            except Exception as e:
+                import traceback
+                traceback.print_exc(file=sys.stderr)
 
             # Try to parse it as an event
             if not packet:
@@ -452,7 +489,8 @@ def intake(listen_tuple, eventQueue):
 
                             # Lambda function which will claim a matching orphan and signal the match success
                             claimed = lambda orphan : currentEvents[tag].claim(orphan) if (orphan['addr'], orphan['trigger_timestamp_l']) == tag else False
-                            
+
+                            print("Trying to claim orphans...", file=sys.stderr)
                             # Note arcane syntax for doing an in-place mutation
                             # (I assign to the slice, instead of to the name)
                             orphanedHits[:] = [orphan for orphan in orphanedHits if not claimed(orphan)]
