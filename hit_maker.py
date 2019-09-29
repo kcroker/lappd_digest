@@ -16,8 +16,10 @@ def linearTestEvent(maxchan, samples, resolution):
     # Do even samples
     sample_list = [samples] * len(chan_list)
 
-    # Make some linear offsets that scale evenly with the channel 
-    offset_list = [math.floor(samples / len(chan_list)) * x for x in chan_list]
+    # Make some linear offsets that scale evenly with the channel
+    # Current protocol limits offsets to 4096, so maximum samples is also 4096 for practical purposes!
+    # Of course, the code can handle an arbitrary number of samples
+    offset_list = [ (math.floor(samples / len(chan_list)) * x) % 4096 for x in chan_list]
     print(offset_list, file=sys.stderr)
     
     #offset_list = [0] * len(chan_list)
@@ -184,6 +186,30 @@ for packet in run:
 # --> PASSED
 #############################################
 run = linearTestEvent(1, 1400*8, 1)
+
+for packet in run:
+    s.send(packet)
+
+# TEST 11 -
+#   Three channels
+#   Byte packing (2 bit resolution, so 2^1)
+#   Fragmentation, 0 remainder
+#
+# --> PASSED
+###########################################
+run = linearTestEvent(3, 1400*8, 1)
+
+for packet in run:
+    s.send(packet)
+
+# TEST 12 -
+#   Three channels
+#   Byte packing (1 bit resolution, so 2^0)
+#   Fragmentation, sub-resolution remainder
+#
+# --> PASSED
+###########################################
+run = linearTestEvent(3, 1400*8 + 3, 0)
 
 for packet in run:
     s.send(packet)

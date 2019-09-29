@@ -208,7 +208,7 @@ class event(object):
         raw_packets.append(eventpacker.pack(event_packet))
         return raw_packets
             
-    def __init__(self, packet):
+    def __init__(self, packet, keep_offset=False):
 
         # Store a reference to the packet
         self.raw_packet = packet
@@ -227,6 +227,9 @@ class event(object):
 
         # Has all of my data arrived?
         self.complete = False
+
+        # Should I keep any offsets present in the data?
+        self.keep_offset = keep_offset
         
         # Am I pedestalling?
         # self.is_pedestal = bool(packet['pedstal'])
@@ -378,9 +381,20 @@ class event(object):
                 amplitudes = self.unpacker.unpack(packet['payload'][i:i+1])
                 for ampl in amplitudes:
                     tmp.append(ampl)
+            
+        # Now, make a new list that is offset
+        # OOO
+        # This can be done in the unpacking step, but premature
+        # optimization is the root of all evil
+        tmp2 = None
+        if not self.keep_offset:# and not packet['drs4_offset'] == 0:
+            # I feel like there should be a list primitive for this
+            print("Subtracting offset from unpacked data...", file=sys.stderr)
+            length = len(tmp)
 
-        print(tmp, file=sys.stderr)
-        
+            # XXX!! Why is this not (i + packet['drs4_offset']) % length
+            tmp = [ tmp[ (i - packet['drs4_offset'] + length) % length ] for i in range(0, length)]
+
         # tmp now contains the unpacked amplitudes as integers
         # Replace the raw payload
         packet['payload'] = tmp
@@ -459,7 +473,7 @@ def intake(listen_tuple, eventQueue):
                             # Probably don't want or need to ship the object
                             # A dictionary of data sufficient for the aggregator level
                             # should be fine
-                            print("Shipping completed packet...", file=sys.stderr)
+                            print("Shipping completed packet...\n\n", file=sys.stderr)
 
                             # Strip unnecessary things from the event
                             # and channels.
@@ -472,6 +486,8 @@ def intake(listen_tuple, eventQueue):
                             # Recover: 0.5 + 2 + 2 + 4 + 1 + 16 (at most) = 24.5 -> ~25 bytes/channel
                             for channel in myevent.channels:
                                 del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
+
+                                # If it was orphaned, we added an address to it
                                 if 'addr' in channel:
                                     del(channel['addr'])
 
@@ -543,7 +559,7 @@ def intake(listen_tuple, eventQueue):
                     continue
 
             # Echo out the most recent packet for debug
-            print(packet, file=sys.stderr)
+            # print(packet, file=sys.stderr)
 
         except KeyboardInterrupt:
             print("\nCaught Ctrl+C, finishing up..", file=sys.stderr)
