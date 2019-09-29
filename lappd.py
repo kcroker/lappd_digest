@@ -460,6 +460,22 @@ def intake(listen_tuple, eventQueue):
                             # A dictionary of data sufficient for the aggregator level
                             # should be fine
                             print("Shipping completed packet...", file=sys.stderr)
+
+                            # Strip unnecessary things from the event
+                            # and channels.
+                            
+                            # Recover: ~1 + ~1 + ~1 + 30 + sizeof(compiled bitstruct)= > 33+ bytes
+                            del(myevent.remaining_hits, myevent.complete, myevent.chunks, myevent.raw_packet)
+                            if hasattr(myevent, 'unpacker'):
+                                del(myevent.unpacker)
+
+                            # Recover: 0.5 + 2 + 2 + 4 + 1 + 16 (at most) = 24.5 -> ~25 bytes/channel
+                            for channel in myevent.channels:
+                                del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
+                                if 'addr' in channel:
+                                    del(channel['addr'])
+
+                            # Push it to the other process
                             eventQueue.put(myevent)
 
                             # Remove this from the list of current events

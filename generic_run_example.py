@@ -159,10 +159,7 @@ while(True):
         # detection = lappd.eventAggregator(eventQueue, len(boards), timeout=1e-3)
 
         detection = [eventQueue.get()]
-    
-        # We've received a detection, dump ascii
-        print("# %s" % detection)
-    
+        
         # Apply the appropriate pedestal to each event
         for anevent in detection:
 
@@ -174,7 +171,7 @@ while(True):
 
         # Dump the entire detection in ASCII
         for channel, packet in anevent.channels.items():
-            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d" % (anevent.eventNumber, channel, packet['drs4_offset'], len(packet['payload'])))
+            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (anevent.eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << anevent.resolution)) - 1))
             for t, ampl in enumerate(packet['payload']):
                 print("%d %d" % (t, ampl))
             print("")
