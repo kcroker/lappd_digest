@@ -46,7 +46,7 @@ globals()['EVT_MAGIC'] = 0x39ab
 #
 # Set a maximum payload size in bytes
 #
-########################################3
+########################################
 globals()['LAPPD_MTU'] = 1400
 
 # Define an event class
@@ -57,19 +57,23 @@ class event(object):
     #
     def generateHit(event, chan, offset, amplitudes):
 
+        if event.resolution < 3:
+            mul = 1 << (3 - event.resolution)
+        else:
+            mul = 1 << (event.resolution - 3)
+        
         # Make sure that amplitudes makes sense for encoding
         remainder = 0
-        if event.resolution > 3:
-            remainder = len(amplitudes) % (1 << (event.resolution - 3))
-        elif event.resolution < 3:
-            # If compressed amplitudes will not fill out a full byte, pad
-            remainder = (len(amplitudes) * 2**event.resolution) % 8
+        if event.resolution < 3:
+            remainder = len(amplitudes) % mul
 
         # Pad with additional amplitudes, if necessary
         if remainder:
-            amplitudes.extend([0]*remainder)
+            print("Padding generated hit with an additional %d amplitudes" % (mul - remainder))
+            amplitudes.extend([0]*(mul - remainder))
 
         # Compute the (total_)hit_payload_size and required number of fragments
+        # XXX?  (sanity check this)
         if event.resolution >= 3:
             hit_payload_size = len(amplitudes) << (event.resolution - 3)
         else:

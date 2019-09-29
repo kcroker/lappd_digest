@@ -20,7 +20,7 @@ def linearTestEvent(maxchan, samples, resolution):
     # Current protocol limits offsets to 4096, so maximum samples is also 4096 for practical purposes!
     # Of course, the code can handle an arbitrary number of samples
     offset_list = [ (math.floor(samples / len(chan_list)) * x) % 4096 for x in chan_list]
-    print(offset_list, file=sys.stderr)
+    print("Offsets:", offset_list, file=sys.stderr)
     
     #offset_list = [0] * len(chan_list)
     
@@ -38,7 +38,7 @@ def linearTestEvent(maxchan, samples, resolution):
 
         # Rescale to the resolution and crop if maxxed out
         ran = [math.floor(y * (2**(2**resolution) - 1)) if y <= 1 else (2**(2**resolution) - 1) for y in ran]
-        print(ran)
+        print("Amplitudes:", ran)
         
         # List out the offset amplitudes
         amplitudes = [ ran[(offset + i) % samples] for i in range(0, samples) ]
@@ -190,7 +190,7 @@ run = linearTestEvent(1, 1400*8, 1)
 for packet in run:
     s.send(packet)
 
-# TEST 11 -
+# TEST 18 -
 #   Three channels
 #   Byte packing (2 bit resolution, so 2^1)
 #   Fragmentation, 0 remainder
@@ -202,10 +202,26 @@ run = linearTestEvent(3, 1400*8, 1)
 for packet in run:
     s.send(packet)
 
-# TEST 12 -
+# TEST 19 -
 #   Three channels
 #   Byte packing (1 bit resolution, so 2^0)
-#   Fragmentation, sub-resolution remainder
+#   No fragmentation
+#   Padding required (samples do not fill out a byte)
+#   Pathology: Channel count is subbyte
+#
+# --> PASSED
+###########################################
+run = linearTestEvent(3, 3, 0)
+
+for packet in run:
+    s.send(packet)
+
+# TEST 20 -
+#   Three channels
+#   Byte packing (1 bit resolution, so 2^0)
+#   No fragmentation
+#   Padding required (samples do not fill out a byte)
+#   Fragmentation, odd remainder
 #
 # --> PASSED
 ###########################################
@@ -213,3 +229,19 @@ run = linearTestEvent(3, 1400*8 + 3, 0)
 
 for packet in run:
     s.send(packet)
+
+# TEST 21 -
+#   Three channels
+#   Byte packing (4 bit resolution, so 2^2)
+#   No fragmentation
+#   Padding required (samples do not fill out a byte)
+#   Fragmentation, odd remainder
+#
+# --> PASSED
+###########################################
+run = linearTestEvent(3, 1400*2 + 1, 2)
+
+for packet in run:
+    s.send(packet)
+    
+
