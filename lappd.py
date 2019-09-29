@@ -208,7 +208,7 @@ class event(object):
         raw_packets.append(eventpacker.pack(event_packet))
         return raw_packets
             
-    def __init__(self, packet):
+    def __init__(self, packet, keep_offset=False):
 
         # Store a reference to the packet
         self.raw_packet = packet
@@ -227,6 +227,9 @@ class event(object):
 
         # Has all of my data arrived?
         self.complete = False
+
+        # Do I subtract offsets, or keep it raw?
+        self.keep_offset = keep_offset
         
         # Am I pedestalling?
         # self.is_pedestal = bool(packet['pedstal'])

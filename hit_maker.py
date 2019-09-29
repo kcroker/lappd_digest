@@ -61,7 +61,7 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 ########################### CHANNELS
 
 #
-# TEST 1 -
+# TEST 0
 #   Single channel
 #   No compression (8 bit resolution, so 2^3)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -74,7 +74,7 @@ for packet in run:
     s.send(packet)
 
 #
-# TEST 2 -
+# TEST 1-2
 #   Two channels
 #   No compression (8 bit resolution, so 2^3)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -87,7 +87,7 @@ for packet in run:
     s.send(packet)
 
 #
-# TEST 3 -
+# TEST 3-5
 #   Three channels
 #   No compression (8 bit resolution, so 2^3)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -100,7 +100,7 @@ for packet in run:
     s.send(packet)
 
 #
-# TEST 4 -
+# TEST 6
 #   One channel
 #   Bit compression (4 bit resolution, so 2^2)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -114,7 +114,7 @@ for packet in run:
 
 ################## SPANNING TESTS
 
-# TEST 5 -
+# TEST 7 -
 #   One channel
 #   Byte spanning (16 bit resolution, so 2^4)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -126,7 +126,7 @@ run = linearTestEvent(1, 512, 4)
 for packet in run:
     s.send(packet)
 
-# TEST 6 -
+# TEST 8-10 -
 #   Three channels
 #   Byte spanning (16 bit resolution, so 2^4)
 #   No fragmentation (payload fits within an 1400 byte MTU)
@@ -140,7 +140,7 @@ for packet in run:
 
 #################### FRAGMENTATION
 
-# TEST 7 -
+# TEST 11-12
 #   Two channels
 #   Byte spanning (16 bit resolution, so 2^4)
 #   Fragmentation, with non-zero remainder
@@ -152,7 +152,7 @@ run = linearTestEvent(2, 4000, 4)
 for packet in run:
     s.send(packet)
 
-# TEST 8 -
+# TEST 13-15
 #   Three channels
 #   Byte packing (4 bit resolution, so 2^2)
 #   Fragmentation, with non-zero remainder
@@ -164,7 +164,7 @@ run = linearTestEvent(3, 5749, 2)
 for packet in run:
     s.send(packet)
 
-# TEST 9 -
+# TEST 16
 #   One channel
 #   Byte spanning (32 bit resolution, 2^5)
 #   Fragmentation, 0 remainder
@@ -176,7 +176,7 @@ run = linearTestEvent(1, 700, 5)
 for packet in run:
     s.send(packet)
 
-# TEST 10 -
+# TEST 17
 #   One channel
 #   Byte packing (2 bit resolution, so 2^1)
 #   Fragmentation, 0 remainder
