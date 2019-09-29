@@ -167,7 +167,7 @@ while(True):
             # to be a hash on their DNAs
             # (Right now, this way to index won't work)
             #event['subtracted'] = board[event['board_id']].pedestals.subtract(event)
-            pass
+            print(anevent, file=sys.stderr)
 
         # Dump the entire detection in ASCII
         for channel, packet in anevent.channels.items():
