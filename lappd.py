@@ -382,8 +382,15 @@ class event(object):
                 for ampl in amplitudes:
                     tmp.append(ampl)
 
-        print(tmp, file=sys.stderr)
-        
+        # Now, make a new list that is offset
+        # OOO
+        # This can be done in the unpacking step, but premature
+        # optimization is the root of all evil
+        if not self.keep_offset:
+            # I feel like there should be a list primitive for this
+            newindex = lambda i : (i + packet['drs4_offset']) % len(tmp)
+            tmp = [tmp[newindex(i)] for i in range(0, len(tmp))]
+            
         # tmp now contains the unpacked amplitudes as integers
         # Replace the raw payload
         packet['payload'] = tmp
