@@ -29,9 +29,7 @@ globals()['HIT_HEADER_SIZE'] = 11
 #  BOARD_ID (48 bits) - Low 48 bits of the Xilinx Device DNA, also equal to the board MAC address apart from a broadcast bit.
 #  EVT_TYPE (8 bits) - encode ADC bit width, compression level if any, etc.
 #   ---> ADC_BIT_WIDTH (3 bits)
-#   ---> PEDESTAL_FLAG (1 bit)
-#   ---> SOFT_TRIGGER (1 bit)
-#   ---> RESERVED (3 bits)
+#   ---> RESERVED (5 bits)
 #  EVT_NUMBER (16 bits) - global event identifier, assumed sequential
 #  EVT_SIZE (16 bits) - event size in bytes
 #  NUM_HITS (8 bits) - for easy alignment and reading
@@ -69,7 +67,7 @@ class event(object):
 
         # Pad with additional amplitudes, if necessary
         if remainder:
-            print("Padding generated hit with an additional %d amplitudes" % (mul - remainder))
+            # print("Padding generated hit with an additional %d amplitudes" % (mul - remainder))
             amplitudes.extend([0]*(mul - remainder))
 
         # Compute the (total_)hit_payload_size and required number of fragments
@@ -198,7 +196,7 @@ class event(object):
             #import pdb
             #pdb.set_trace()
 
-            print("Encoding fragment %d, channel %d" % (packet['seq'], packet['channel_id']))
+            # print("Encoding fragment %d, channel %d" % (packet['seq'], packet['channel_id']))
             
             # Slice the header into the front
             packet['payload'][:0] = hitpacker.pack(packet)
@@ -265,6 +263,15 @@ class event(object):
             # Then we need to be gluing bytes together (or copying)
             self.chunks = 1 << (self.resolution - 3)
 
+    #
+    # Determine a signature for this event, once it is complete.
+    # The signature allows you to sensibly subtract pedestals.
+    #
+    # In principle, a device may provide any number of amplitudes on each channel (e.g. distinct ROIs per channel)
+    # By design, an event always takes place at a fixed resolution for all channels.
+    #
+    # The signature gives a full channel list, the number of amplitudes 
+    
     #
     # This hit has been routed to this event
     #
@@ -402,7 +409,6 @@ class event(object):
         # tmp now contains the unpacked amplitudes as integers
         # Replace the raw payload
         packet['payload'] = tmp
-        
         
 # Multiprocess fork() entry point
 def intake(listen_tuple, eventQueue):

@@ -15,6 +15,7 @@
 import sys
 import eevee
 import lappd
+import pedestal
 import multiprocessing
 
 #
@@ -75,10 +76,10 @@ eventQueue = multiprocessing.Queue()
 if __name__ == '__main__':
     multiprocessing.Process(target=lappd.intake, args=((ourself, port), eventQueue)).start()    
 
-# #
-# # STEP 4 - pedestal the boards
-# #
-# ######################################
+#
+# STEP 4 - pedestal the boards
+#
+######################################
 
 # # Build pedestals by queueing 100 soft triggers
 # N_pedestalSamples = 100
@@ -92,37 +93,6 @@ if __name__ == '__main__':
 #     # Note that doing it this way keeps you from blasting 100 control packets
 #     # to each board.  So instead of 100 packets, we send 1.
 #     board.transact()
-
-#     # Fresh one for this board
-#     pedestalEvents = []
-
-#     # The eventQueue should be full or filling up with of event data for the this board
-#     try:
-#         while True:
-#             # Wait at most 1 milisecond to get something
-#             event = eventQueue.get(timeout=1e-3)
-
-#             # Sanity check the event
-#             if not event['addr'] == board.dest:
-#                 print(file=sys.stderr, "Received an event from %s (%s), but expecting only events from %s.  Suspiciously dropping..." % (event['addr'], event['board_id'], board.dest))
-#             else:
-#                 pedestalEvents.append()
-#     except queue.Empty as e:
-
-#         # Did we get what we expected?
-#         N = len(pedestalEvents)
-
-#         # Inform the user
-#         if N == N_pedestalSamples:
-#             print(file=sys.stderr, "Pedestal acquisition successful")
-#         else:
-#             print(file=sys.srderr, "Pedestal acquisition INCOMPLETE")
-
-#         # Give some specs
-#         print(file=sys.stderr, "\tBoard: %s\n\tSamples requested: %d\n\tSamples received: %d" % (board, N_pedestalSamples, N))
-
-#     # Associate an object to this board, that can this pedestal data taken with this board
-#     board.pedestals = lappd.pedestal_system(pedestalEvents)
 
 # #
 # # STEP 5 - set into data run-mode configuration
@@ -158,20 +128,34 @@ while(True):
         # Their order is sorted by event['board_id']
         # detection = lappd.eventAggregator(eventQueue, len(boards), timeout=1e-3)
 
-        detection = [eventQueue.get()]
-        
-        # Apply the appropriate pedestal to each event
-        for anevent in detection:
+        # Pedestal
+        N = 200
+        pedestalList = []
+        while N:
+            pedestalList.append(eventQueue.get())
+            N -= 1
+            print("%d remaining pedestal samples to collect..." % N, file=sys.stderr)
 
-            # I think I want to adjust the returned boards from discover()
-            # to be a hash on their DNAs
-            # (Right now, this way to index won't work)
-            #event['subtracted'] = board[event['board_id']].pedestals.subtract(event)
-            print(anevent, file=sys.stderr)
+        # Make it 10k
+        # pedestalList = pedestalList*100
+
+        print("Profiling pedestal construction...", file=sys.stderr)
+        import time
+        start = time.time()
+        
+        # We have the pedestal now
+        myPedestal = pedestal.pedestal(pedestalList)
+
+        end = time.time()
+        print("Pedestal built:  Total time %f" % (end - start), file=sys.stderr)
+
+        # Subtract the pedestals
+        for event in pedestalList:
+            myPedestal.subtract(event)
 
         # Dump the entire detection in ASCII
-        for channel, packet in anevent.channels.items():
-            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (anevent.eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << anevent.resolution)) - 1))
+        for channel, packet in pedestalList[0].channels.items():
+            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (pedestalList[0].eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << pedestalList[0].resolution)) - 1))
             for t, ampl in enumerate(packet['payload']):
                 print("%d %d" % (t, ampl))
             print("")
