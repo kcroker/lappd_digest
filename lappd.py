@@ -302,6 +302,8 @@ class event(object):
             width = len(packet['payload'])
 
             # Copy it in
+            # XXX This will fuck up if the firmware drops payload bytes
+            # So remember we saw last packet, and raise an exception if we see a short packet again!
             if width < LAPPD_MTU:
                 # We received the last one
                 working_packet['payload'][packet['seq']*LAPPD_MTU:packet['seq']*LAPPD_MTU + width] = packet['payload']
@@ -327,6 +329,13 @@ class event(object):
 
                 # Deep copy first
                 tmp = bytearray(packet['payload'])
+
+                # XXX Initialize with something that is not valid data
+                #
+                # Encode as NaNs
+                #
+                # XXX Current ADC's read out [-max/2,max/2] 
+                
                 width = len(tmp)
                 
                 # Overwrite
