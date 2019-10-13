@@ -128,34 +128,11 @@ while(True):
         # Their order is sorted by event['board_id']
         # detection = lappd.eventAggregator(eventQueue, len(boards), timeout=1e-3)
 
-        # Pedestal
-        N = 200
-        pedestalList = []
-        while N:
-            pedestalList.append(eventQueue.get())
-            N -= 1
-            print("%d remaining pedestal samples to collect..." % N, file=sys.stderr)
-
-        # Make it 10k
-        # pedestalList = pedestalList*100
-
-        print("Profiling pedestal construction...", file=sys.stderr)
-        import time
-        start = time.time()
+        events = eventQueue.get()
         
-        # We have the pedestal now
-        myPedestal = pedestal.pedestal(pedestalList)
-
-        end = time.time()
-        print("Pedestal built:  Total time %f" % (end - start), file=sys.stderr)
-
-        # Subtract the pedestals
-        for event in pedestalList:
-            myPedestal.subtract(event)
-
         # Dump the entire detection in ASCII
-        for channel, packet in pedestalList[0].channels.items():
-            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (pedestalList[0].eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << pedestalList[0].resolution)) - 1))
+        for channel, packet in events.channels.items():
+            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (events[0].eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << events[0].resolution)) - 1))
             for t, ampl in enumerate(packet['payload']):
                 print("%d %d" % (t, ampl))
             print("")
