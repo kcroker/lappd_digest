@@ -22,7 +22,7 @@ hit_fmt = "u16 u8 u16 u8 u16 u32"
 hitpacker = bitstruct.compile(hit_fmt, ["magic", "channel_id", "drs4_offset", "seq", "hit_payload_size", "trigger_timestamp_l"])
 globals()['HIT_MAGIC'] = 0x39a
 globals()['HIT_FOOTER_MAGIC'] = 1024
-globals()['HIT_HEADER_SIZE'] = 11
+globals()['HIT_HEADER_SIZE'] = bitstruct.calcsize(hit_fmt)>>3
 
 # Define the format of an event header packet
 #  EVT_HEADER_MAGIC_WORD (16 bits) - just pick something easily readable in the hex stream for now
@@ -101,7 +101,8 @@ class event(object):
 
             # Sanity check it
             if self.receivedBytes > self.targetLength:
-                raise Exception("Received %d of expected %d bytes!  Too many!")
+                print(packet)
+                raise Exception("Received %d of expected %d bytes!  Too many!" % (self.receivedBytes, self.targetLength))
 
             print("Stashed seq %d for channel %d with %d bytes.  %d remaining bytes" % (packet['seq'], packet['channel_id'], len(packet['payload']), self.targetLength - self.receivedBytes), file=sys.stderr)
                   
@@ -563,7 +564,8 @@ def intake(listen_tuple, eventQueue):
                     
                     # Its a hit, lets get it routed
                     tag = (addr[0], packet['trigger_timestamp_l'])
-
+                    packet['addr'] = addr[0]
+                    
                     # Do we have an event to associate this with?
                     if tag in currentEvents:
 
@@ -594,12 +596,14 @@ def intake(listen_tuple, eventQueue):
                                 del(myevent.unpacker)
 
                             # Recover: 0.5 + 2 + 2 + 4 + 1 + 16 (at most) = 24.5 -> ~25 bytes/channel
-                            for channel in myevent.channels:
-                                del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
+                            print(myevent.channels)
+                            
+                            #for channel in myevent.channels:
+                            #    del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
 
-                                # If it was orphaned, we added an address to it
-                                if 'addr' in channel:
-                                    del(channel['addr'])
+                            #    # If it was orphaned, we added an address to it
+                            #    if 'addr' in channel:
+                            #        del(channel['addr'])
 
                             # Push it to the other process
                             eventQueue.put(myevent)

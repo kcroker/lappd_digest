@@ -24,8 +24,8 @@ import multiprocessing
 #######################################
 
 # Define some things for the network topology
-ourself = 'localhost'
-port = 1338
+ourself = '10.0.6.254'
+port = 1445
 
 # # Get all the boards on the subnet
 # broadcast = '10.0.6.255'
