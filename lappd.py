@@ -18,7 +18,7 @@ import math
 # ------------------------------------ (bitstruct for the above fixed header, 11 bytes)
 #  PAYLOAD (arbitrary, but less than an Ethernet MTU for sure)
 #  HIT_FOOTER_MAGIC (16 bits)
-hit_fmt = "u16 u8 u12 u4 u16 u32"
+hit_fmt = "u16 u8 u16 u8 u16 u32"
 hitpacker = bitstruct.compile(hit_fmt, ["magic", "channel_id", "drs4_offset", "seq", "hit_payload_size", "trigger_timestamp_l"])
 globals()['HIT_MAGIC'] = 0x39a
 globals()['HIT_FOOTER_MAGIC'] = 1024
@@ -36,7 +36,7 @@ globals()['HIT_HEADER_SIZE'] = 11
 #  TRIGGER_TIMESTAMP_H (32-bits)
 #  TRIGGER_TIMESTAMP_L (32-bits)
 #  RESERVED (64-bits)
-event_fmt = "u16 r48 u3 p5 u16 u16 u8 u32 u32 p64"
+event_fmt = "u16 r48 p8 u3 p5 u16 u16 u8 p8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
     
@@ -247,12 +247,6 @@ class event(object):
     #
     # This generates an event, for testing
     #
-    # XXX This generator does not produce subhits.
-    #     and so cannot be used to test subhit reconstruction.
-    #
-    # This will be modified to place the amplitudes received at the offsets listed
-    # with the first offset being the sequence = 0
-
     def generateEvent(event_number, resolution, chan_list, subhits_list, max_sample):
 
         # Make a dummy event
@@ -356,7 +350,7 @@ class event(object):
         if self.resolution < 3:
             # Then we only need to look at a byte at a time
             self.chunks = 0
-            self.unpacker = bitstruct.compile(" ".join(["u%d" % (1 << self.resolution)] * (8 >> self.resolution)))
+            self.unpacker = bitstruct.compile(" ".join(["s%d" % (1 << self.resolution)] * (8 >> self.resolution)))
         else:
             # Then we need to be gluing bytes together (or copying)
             self.chunks = 1 << (self.resolution - 3)

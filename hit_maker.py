@@ -80,7 +80,7 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-run = linearTestEvent(2, 4, 200, 4)
+run = linearTestEvent(2, 4, 200, 2)
 
 for packet in run:
     s.send(packet)
