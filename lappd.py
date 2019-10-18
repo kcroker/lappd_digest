@@ -21,7 +21,7 @@ import math
 hit_fmt = "u16 u8 u12 u4 u16 u32"
 hitpacker = bitstruct.compile(hit_fmt, ["magic", "channel_id", "drs4_offset", "seq", "hit_payload_size", "trigger_timestamp_l"])
 globals()['HIT_MAGIC'] = 0x39a
-globals()['HIT_FOOTER_MAGIC'] = 0xd00b
+globals()['HIT_FOOTER_MAGIC'] = 1024
 globals()['HIT_HEADER_SIZE'] = 11
 
 # Define the format of an event header packet
@@ -39,8 +39,7 @@ globals()['HIT_HEADER_SIZE'] = 11
 event_fmt = "u16 r48 u3 p5 u16 u16 u8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
-
-
+    
 #
 # Set a maximum payload size in bytes
 #
@@ -66,29 +65,30 @@ class event(object):
             self.payloads = {}
 
             # The total number of samples possible 
-            self.total_samples = 0
+            self.max_samples = 0
             
             # And stash the first one received
-            stash(packet)
+            self.stash(packet)
             
         def stash(self, packet):
 
             # Sanity check
             if self.targetLength < 0:
                 # Initialize some things
-                self.targetLength = packet['hit_payload_length']
-                self.total_samples = packet['total_samples']
+                self.targetLength = packet['hit_payload_size']
+                self.max_samples = packet['max_samples']
+                print("New subhit stash for channel %d" % packet['channel_id'], file=sys.stderr)
                 
             else:
                 # Verify it
-                if not self.targetLength == packet['hit_payload_length']:
+                if not self.targetLength == packet['hit_payload_size']:
                     raise Exception("Inconsistent total hit payload length, not stashing packet!")
 
-                if not self.total_samples = packet['total_samples']:
+                if not self.max_samples == packet['max_samples']:
                     raise Exception("Inconsistent total samples count (e.g. bad footer), not stashing packet!")
 
             # Make sure there are no dups
-            if self.payloads[packet['seq']]:
+            if packet['seq'] in self.payloads:
                 raise Exception("Duplicate fragment received!")
 
             # We will eventually sort by the sequence number once we have all the packets
@@ -101,11 +101,10 @@ class event(object):
             if self.receivedBytes > self.targetLength:
                 raise Exception("Received %d of expected %d bytes!  Too many!")
 
+            print("Stashed seq %d for channel %d with %d bytes.  %d remaining bytes" % (packet['seq'], packet['channel_id'], len(packet['payload']), self.targetLength - self.receivedBytes), file=sys.stderr)
+                  
         def completed(self):
             return self.receivedBytes == self.targetLength
-
-                                
-            
             
     #
     # This generates hits, for testing
@@ -113,103 +112,132 @@ class event(object):
     # XXX This generator does not produce subhits.
     #     and so cannot be used to test subhit reconstruction.
     #
-    def generateHit(event, chan, offset, amplitudes):
+    # This will be modified to place the amplitudes received at the offsets listed
+    # with the first offset being the sequence = 0
+    #
+    # subhits is a list of (offset, amplitudes) tuples
+    #
+    def generateHit(event, chan, subhits):
 
         if event.resolution < 3:
             mul = 1 << (3 - event.resolution)
         else:
             mul = 1 << (event.resolution - 3)
-        
-        # Make sure that amplitudes makes sense for encoding
-        remainder = 0
-        if event.resolution < 3:
-            remainder = len(amplitudes) % mul
 
-        # Pad with additional amplitudes, if necessary
-        if remainder:
-            # print("Padding generated hit with an additional %d amplitudes" % (mul - remainder))
-            amplitudes.extend([0]*(mul - remainder))
-
-        # Compute the (total_)hit_payload_size and required number of fragments
-        # XXX?  (sanity check this)
-        if event.resolution >= 3:
-            hit_payload_size = len(amplitudes) << (event.resolution - 3)
-        else:
-            hit_payload_size = len(amplitudes) >> (3 - event.resolution)
-
-        # Sanity check that this is an integer
-        if not isinstance(hit_payload_size, int):
-            raise ValueError("You computed padding wrong, hit_payload_size stopped being an integer")
-
-        # Determine how many fragments we need and the length of the last fragment
-        num_fragments = math.ceil(hit_payload_size / LAPPD_MTU)
-        final_fragment_length = hit_payload_size - (num_fragments-1)*LAPPD_MTU
-        
-        # Sanity check
-        if final_fragment_length > LAPPD_MTU:
-            raise Exception("Something is insane in fragment payload size computations")
-        
-        # Make the total payload as a byte array
-        total_payload = bytearray(hit_payload_size)
-        
-        # [We use hasattr() here because the code reads better than "if not event.unpacker or trying to catch some weird language exception"]
-        if not hasattr(event, 'unpacker'):
-
-            # How many bytes do we get for each amplitude?
-            mul = 1 << (event.resolution - 3)
-
-            # We are doing explosion (or just endian-flip)
-            for i,ampl in enumerate(amplitudes):
-                total_payload[i*mul:(i+1)*mul] = ampl.to_bytes(mul, byteorder='big')
-        else:
-
-            # We are doing compression
-            j = 0
-            mul = 1 << (3 - event.resolution)
-            for i in range(0, len(amplitudes) >> (3 - event.resolution)):
-
-                # This should contain a single byte when done
-                # Notice the star, to turn the iterable into an argument list
-                compressed = event.unpacker.pack(*amplitudes[i*mul:(i+1)*mul])
-                total_payload[j] = compressed[0]
-                j += 1
-            
-        # Okay, we now have a payload.
-        # Build the hit, splitting the payload into fragments
+        # Go through each subhit and make fragments if necessary
+        hit_payload_size = 0
+        seqn = 0
         fragments = []
-        fragment = {}
-
-        # Set things that are common to all fragments
-        fragment['magic'] = HIT_MAGIC
-        fragment['resolution'] = event.resolution
-        fragment['trigger_timestamp_l'] = event.raw_packet['trigger_timestamp_l']
-        fragment['channel_id'] = chan
-        fragment['drs4_offset'] = offset
-        fragment['hit_payload_size'] = hit_payload_size
-
-        #import pdb
-        #pdb.set_trace()
         
-        # Now populate individual fragments
-        # Gotta reset i, because if we never enter the loop, then i never changes
-        i = 0
-        for i in range(0, num_fragments-1):
-
-            # Note that we have to make an explicit copy
-            # or else we just keep rewriting the same object
-            tmp = fragment.copy()
-            tmp['seq'] = i
-            tmp['payload'] = total_payload[i*LAPPD_MTU:(i+1)*LAPPD_MTU]
-            fragments.append(tmp)
-
-        # And do the final fragment
-        if num_fragments > 1:
-            i += 1
+        for offset, amplitudes in subhits:
             
-        fragment['seq'] = i
-        fragment['payload'] = total_payload[i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
-        fragments.append(fragment)
+            # Make sure that amplitudes makes sense for encoding
+            remainder = 0
+            if event.resolution < 3:
+                remainder = len(amplitudes) % mul
 
+            # Pad with additional amplitudes, if necessary
+            if remainder:
+                print("Padding generated hit with an additional %d amplitudes.  Fix your amplitude list, dummy" % (mul - remainder))
+                # Extend with the -1...
+                amplitudes.extend([-1]*(mul - remainder))
+                
+            # Compute the (total_)hit_payload_size and required number of fragments
+            # XXX?  (sanity check this)
+            if event.resolution >= 3:
+                subhit_payload_size = len(amplitudes) << (event.resolution - 3)
+            else:
+                subhit_payload_size = len(amplitudes) >> (3 - event.resolution)
+
+            # Sanity check that this is an integer
+            if not isinstance(subhit_payload_size, int):
+                raise ValueError("You computed padding wrong, subhit_payload_size stopped being an integer")
+
+            # Track it
+            hit_payload_size += subhit_payload_size
+            
+            # Determine how many fragments we need and the length of the last fragment
+            num_fragments = math.ceil(subhit_payload_size / LAPPD_MTU)
+            final_fragment_length = subhit_payload_size - (num_fragments-1)*LAPPD_MTU
+        
+            # Sanity check
+            if final_fragment_length > LAPPD_MTU:
+                raise Exception("Something is insane in fragment payload size computations")
+        
+            # Make the total payload as a byte array
+            subhit_total_payload = bytearray(subhit_payload_size)
+        
+            # [We use hasattr() here because the code reads better than "if not event.unpacker or trying to catch some weird language exception"]
+            if not hasattr(event, 'unpacker'):
+
+                # How many bytes do we get for each amplitude?
+                mul = 1 << (event.resolution - 3)
+
+                # We are doing explosion (or just endian-flip)
+                for i,ampl in enumerate(amplitudes):
+                    subhit_total_payload[i*mul:(i+1)*mul] = ampl.to_bytes(mul, byteorder='big', signed=True)
+            else:
+                # We are doing compression
+                j = 0
+                mul = 1 << (3 - event.resolution)
+                for i in range(0, len(amplitudes) >> (3 - event.resolution)):
+
+                    # This should contain a single byte when done
+                    # Notice the star, to turn the iterable into an argument list
+                    #
+                    # XXX
+                    # This will shit out on signed quantities
+                    compressed = event.unpacker.pack(*amplitudes[i*mul:(i+1)*mul])
+                    subhit_total_payload[j] = compressed[0]
+                    j += 1
+            
+            # Okay, we now have a payload.
+            # Build the hit, splitting the payload into fragments
+            fragment = {}
+
+            # Set things that are common to all fragments
+            fragment['magic'] = HIT_MAGIC
+            fragment['resolution'] = event.resolution
+            fragment['trigger_timestamp_l'] = event.raw_packet['trigger_timestamp_l']
+            fragment['channel_id'] = chan
+            fragment['drs4_offset'] = offset
+
+            # Now populate individual fragments
+            # Gotta reset i, because if we never enter the loop, then i never changes
+            i = 0
+            for i in range(0, num_fragments-1):
+
+                # Note that we have to make an explicit copy
+                # or else we just keep rewriting the same object
+                tmp = fragment.copy()
+                tmp['seq'] = seqn + i
+                tmp['payload'] = subhit_total_payload[i*LAPPD_MTU:(i+1)*LAPPD_MTU]
+                
+                fragments.append(tmp)
+                print("Appended fragment %d" % (seqn + i), file=sys.stderr)
+                
+            # And do the final fragment
+            if num_fragments > 1:
+                i += 1
+            
+            fragment['seq'] = seqn + i
+
+            fragment['payload'] = subhit_total_payload [i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
+            fragments.append(fragment)
+            print("Appended fragment %d" % (seqn + i), file=sys.stderr)
+
+#            import pdb
+ #           pdb.set_trace()
+
+            # Increment the global sequence
+            seqn += num_fragments
+
+
+        # Now we are all done with subhits, so set the correct total payload length
+        # inside every fragment
+        for fragment in fragments:
+            fragment['hit_payload_size'] = hit_payload_size
+            
         # Return the list of fragments
         return fragments
 
@@ -219,8 +247,10 @@ class event(object):
     # XXX This generator does not produce subhits.
     #     and so cannot be used to test subhit reconstruction.
     #
+    # This will be modified to place the amplitudes received at the offsets listed
+    # with the first offset being the sequence = 0
 
-    def generateEvent(event_number, resolution, chan_list, offset_list, amplitudes_list):
+    def generateEvent(event_number, resolution, chan_list, subhits_list, max_sample):
 
         # Make a dummy event
         event_packet = {}
@@ -236,15 +266,18 @@ class event(object):
         # Generate the event object
         # (we do this since it makes the bit packer/unpacker for us)
         testEvent = event(event_packet)
-            
+
+        # Hack in the maximum sample
+        testEvent.max_sample = max_sample
+        
         # Now generate the hits
         hitPackets = []
 
-        for chan, offset, amplitudes in zip(chan_list, offset_list, amplitudes_list):
+        for chan, subhits in zip(chan_list, subhits_list):
 
             # We use extend() because event.generateHit(...) possibly returns a list of
             # hit fragments
-            hitPackets.extend(event.generateHit(testEvent, chan, offset, amplitudes))
+            hitPackets.extend(event.generateHit(testEvent, chan, subhits))
             
             # See how much size this added to the event
             # any fragment will work, so use the last one
@@ -256,9 +289,6 @@ class event(object):
 
         # Make the bytes for the hit packets
         for packet in hitPackets:
-
-            #import pdb
-            #pdb.set_trace()
 
             # print("Encoding fragment %d, channel %d" % (packet['seq'], packet['channel_id']))
             
@@ -349,9 +379,9 @@ class event(object):
             
             # Raise an exception with the bad packet attached
             e = Exception("Received an empty payload...")
+            print(packet, file=sys.stderr)
             e.packet = packet
             raise e
-
 
         # Route this hit to the appropriate channel
         if packet['channel_id'] in self.channels:
@@ -365,7 +395,7 @@ class event(object):
             print("Hit establishing data for channel %d, via fragment %d" % (packet['channel_id'], packet['seq']), file=sys.stderr)
 
             # This is the first fragment
-            self.channels[packet['channel_id']] = hitstash(packet)
+            self.channels[packet['channel_id']] = event.hitstash(packet)
 
         # A quick alias
         current_hit = self.channels[packet['channel_id']]
@@ -374,56 +404,59 @@ class event(object):
         if current_hit.completed(): 
 
             # Remove these bytes from the total expected over all channels
-            self.remainingBytes -= current_hit.receivedBytes
+            self.remaining_bytes -= current_hit.receivedBytes
             
             print("All expected hit bytes received on channel %d.  Unpacking..." % packet['channel_id'], file=sys.stderr)
             
             # Notice that we sort the dictionary by sequence numbers!
-            subhit_ampls = [(offset, self.unpack(payload)) for offset, payload in sorted(current_hit.payloads)]
+            subhits = [(offnpay[0], self.unpack(offnpay[1])) for seq, offnpay in sorted(current_hit.payloads.items(), key=lambda x:x[0])]
 
             # Allocate space for the entire dero
             # Note that -1 signifies no data received, either due to packet drop or that the
             # device didn't report it
-            amplitudes = [-1] * current_hit.total_samples
+            amplitudes = [-10] * current_hit.max_samples
             
             # Assign by slicing directly into the amplitudes
             # OOO we can write torn offsets directly here
-            for offset, ampls in subhit_ampls:
+            for offset, ampls in subhits:
 
+                print(ampls, file=sys.stderr)
                 # Don't know how much optimiation python does with minimizing the number of
                 # lookups on len, which is O(N)...
                 len_ampls = len(ampls)
                 end = offset + len_ampls
 
                 # Slice it in, if we don't overrun
-                if end < current_hit.total_samples:
-                    amplitudes[offset:len_ampls] = ampls
+                if end < current_hit.max_samples:
+                    amplitudes[offset:end] = ampls
                 else:
                     # Slice in what we can at the end...
                     # XXX off by 1?
-                    delta = current_hit.total_samples - offset
-                    amplitudes[offset:current_hit.total_samples] = ampls[:delta]
+                    overrun = end - current_hit.max_samples
+                    fit = current_hit.max_samples - offset
+                    amplitudes[offset:current_hit.max_samples] = ampls[:fit]
 
                     # ... and slice the rest in at the front
-                    amplitudes[:len_ampls - delta] = ampls[len_amples - delta]
+                    amplitudes[:overrun] = ampls[fit:]
 
             # All subhits are now in place.
             
             # Are we trying to zero offset?  
-            if not self.keep_offset:
+            if self.keep_offset:
 
                 # This is the first sampled capacitor position, in time
                 tare = subhit_ampls[0][0]
-            
+                print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
+                
                 # Never do a modulo in a loop computation, god
                 # Since we are not memory limited in 2019, just do an offset copy
-                tmp = bytearray(current_hit.total_samples)
+                tmp = [0]*(current_hit.max_samples)
 
                 # Minimize computations
-                delta = current_hit.total_samples - tare
+                delta = current_hit.max_samples - tare
 
                 # Do the head of the final list...
-                tmp[:delta] = amplitudes[tare:current_hit.total_samples]
+                tmp[:delta] = amplitudes[tare:current_hit.max_samples]
 
                 # ... and the tail
                 tmp[delta:] = amplitudes[0:tare]
@@ -460,7 +493,7 @@ class event(object):
         if self.chunks > 0:
 
             # Populate the list
-            tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big') for i in range(0, len(payload) >> (self.resolution - 3))]
+            tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
         else:
             # OOO
             # We should technically do a computation here too and not use append...
@@ -529,7 +562,7 @@ def intake(listen_tuple, eventQueue):
                     packet['payload'] = data[HIT_HEADER_SIZE:-2]
 
                     # Interpret the footer as the total number of samples possible within this data
-                    packet['total_samples'] = int(data[-2])
+                    packet['max_samples'] = int.from_bytes(data[-2:], byteorder='big')
                     
                     # Its a hit, lets get it routed
                     tag = (addr[0], packet['trigger_timestamp_l'])

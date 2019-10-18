@@ -128,12 +128,12 @@ while(True):
         # Their order is sorted by event['board_id']
         # detection = lappd.eventAggregator(eventQueue, len(boards), timeout=1e-3)
 
-        events = eventQueue.get()
-        
-        # Dump the entire detection in ASCII
-        for channel, packet in events.channels.items():
-            print("# event number = %d\n# channel = %d\n# offset = %d\n# samples = %d\n# y_max = %d" % (events[0].eventNumber, channel, packet['drs4_offset'], len(packet['payload']), (1 << (1 << events[0].resolution)) - 1))
-            for t, ampl in enumerate(packet['payload']):
+        event = eventQueue.get()
+                
+        # # Dump the entire detection in ASCII
+        for channel, amplitudes in event.channels.items():
+            print("# event number = %d\n# channel = %d\n# samples = %d\n# y_max = %d" % (event.eventNumber, channel, len(amplitudes), (1 << (1 << event.resolution)) - 1))
+            for t, ampl in enumerate(amplitudes):
                 print("%d %d" % (t, ampl))
             print("")
         
