@@ -21,21 +21,20 @@ import lappd
 def generateSubhits(M, channel, samples, resolution, max_samples):
     subhits = []
 
-    dom = np.linspace(0, 1, samples)
-    
     for m in range(0, M):
+        dom = np.linspace(0, 1, math.ceil(((m+1)/M)*samples))
         offset = m*samples + 10*m
-        subhit = [ math.floor((2 << 1 << resolution) * ((m+1) * (t - m/M) + channel) / 2.0) for t in dom]
+        subhit = [ math.floor((2 << (1 << resolution) - 1) * ((m+1) * (t - m/M) + channel) / 2.0 / (M + channel)) for t in dom]
         subhits.append((offset, subhit))
 
     print(subhits)
     return subhits
 
 # Event maker, event maker, make me an event
-def linearTestEvent(maxchan, samples, resolution):
+def linearTestEvent(channels, subhits, samples, resolution):
 
-    chan_list = [i for i in range(0, maxchan)]
-    subhit_list = [generateSubhits(4, chan, samples, resolution, 1024) for chan in chan_list]
+    chan_list = [i for i in range(0, channels)]
+    subhit_list = [generateSubhits(subhits, chan, samples, resolution, 1024) for chan in chan_list]
     
     # Produce the event
     # Packets are in backwards order: all orphaned hits, followed by the event
@@ -81,7 +80,7 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-run = linearTestEvent(2, 200, 4)
+run = linearTestEvent(2, 4, 200, 4)
 
 for packet in run:
     s.send(packet)

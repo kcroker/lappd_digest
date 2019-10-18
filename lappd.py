@@ -44,7 +44,9 @@ globals()['EVT_MAGIC'] = 0x39ab
 # Set a maximum payload size in bytes
 #
 ########################################
-globals()['LAPPD_MTU'] = 1400
+
+# Force fragmentation
+globals()['LAPPD_MTU'] = 90
 
 # Define an event class
 class event(object):
@@ -108,12 +110,6 @@ class event(object):
             
     #
     # This generates hits, for testing
-    #
-    # XXX This generator does not produce subhits.
-    #     and so cannot be used to test subhit reconstruction.
-    #
-    # This will be modified to place the amplitudes received at the offsets listed
-    # with the first offset being the sequence = 0
     #
     # subhits is a list of (offset, amplitudes) tuples
     #
@@ -200,7 +196,6 @@ class event(object):
             fragment['resolution'] = event.resolution
             fragment['trigger_timestamp_l'] = event.raw_packet['trigger_timestamp_l']
             fragment['channel_id'] = chan
-            fragment['drs4_offset'] = offset
 
             # Now populate individual fragments
             # Gotta reset i, because if we never enter the loop, then i never changes
@@ -212,22 +207,30 @@ class event(object):
                 tmp = fragment.copy()
                 tmp['seq'] = seqn + i
                 tmp['payload'] = subhit_total_payload[i*LAPPD_MTU:(i+1)*LAPPD_MTU]
-                
+                tmp['drs4_offset'] = offset
+
+                # Add this subhit fragment
                 fragments.append(tmp)
                 print("Appended fragment %d" % (seqn + i), file=sys.stderr)
                 
+                # Update the offset, since we fragment as if we had back to back offsets
+                if event.resolution - 3 >= 0:
+                    offset += LAPPD_MTU >> (event.resolution - 3)
+                else:
+                    offset += LAPPD_MTU << (3 - event.resolution)
+
             # And do the final fragment
             if num_fragments > 1:
                 i += 1
             
             fragment['seq'] = seqn + i
-
-            fragment['payload'] = subhit_total_payload [i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
+            fragment['drs4_offset'] = offset
+            fragment['payload'] = subhit_total_payload[i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
             fragments.append(fragment)
             print("Appended fragment %d" % (seqn + i), file=sys.stderr)
 
 #            import pdb
- #           pdb.set_trace()
+#            pdb.set_trace()
 
             # Increment the global sequence
             seqn += num_fragments
