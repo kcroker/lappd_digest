@@ -313,6 +313,9 @@ class event(object):
         # means across all participating boards.
         self.eventNumber = packet['evt_number']
 
+        # Store the board id, jesus
+        self.board_id = packet['board_id']
+        
         # Keep track of our ... greatest hits ;)
         self.channels = {}
 
@@ -596,8 +599,6 @@ def intake(listen_tuple, eventQueue):
                                 del(myevent.unpacker)
 
                             # Recover: 0.5 + 2 + 2 + 4 + 1 + 16 (at most) = 24.5 -> ~25 bytes/channel
-                            print(myevent.channels)
-                            
                             #for channel in myevent.channels:
                             #    del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
 

@@ -13,10 +13,18 @@
 ####################################################################################
 
 import sys
+import os
+
+# Do not ask me why this needs to be included now...
+sys.path.append("./eevee")
+os.environ['EEVEE_SRC_PATH'] = "./eevee"
+
 import eevee
 import lappd
 import pedestal
 import multiprocessing
+import pickle
+import queue
 
 #
 # STEP 1 - get control connections
@@ -25,11 +33,22 @@ import multiprocessing
 
 # Define some things for the network topology
 ourself = '10.0.6.254'
-port = 1445
+port = 1444
 
 # # Get all the boards on the subnet
 # broadcast = '10.0.6.255'
-# boards = eevee.discover(broadcast)
+if len(sys.argv) < 2:
+    print("Usage: %s <target board ip address> [pedestal file | NONE]" % sys.argv[0])
+    print("(NOTE: not specifying a pedestal file or NONE will cause pedestals to be taken)")
+    exit(1)
+
+# Open up a control connection
+board = eevee.board(sys.argv[1])
+
+# Aim the board at ourself
+#  This sets the outgoing data path port on the board to port
+#  And sets the destination for data path packets to port
+board.aimNBIC(ourself, port)
 
 # #
 # # STEP 2 - initialize the boards
@@ -60,56 +79,62 @@ port = 1445
 ########################################
 
 # This forks (process) and returns a process safe queue.Queue.
-# The fork listens for, and then reassembles, fragmented data and
-# then shifts this data according delay line offset.
+# The fork listens for, and then reassembles, fragmented data
 #
 # Data is in the form of dictionaries, that have event header fields
 # augmented with a list of channels that link to hits
 #
-# If a hit was not received on that channel, the type is set to None
-# Because we will implement a listener
 
 # Required for multiprocess stuff
 eventQueue = multiprocessing.Queue()
 
 # Since we are in UNIX, this will operate via a fork()
 if __name__ == '__main__':
-    multiprocessing.Process(target=lappd.intake, args=((ourself, port), eventQueue)).start()    
+     multiprocessing.Process(target=lappd.intake, args=((ourself, port), eventQueue)).start()    
 
 #
-# STEP 4 - pedestal the boards
+# STEP 4 - pedestal the board
 #
 ######################################
 
-# # Build pedestals by queueing 100 soft triggers
-# N_pedestalSamples = 100
+activePedestal = None
 
-# for board in boards:
-    
-#     # (This control packet will be around 1k, so < 1 MTU)
-#     for i in range(0, N_pedestalSamples):
-#         board.poke(SOFT_TRIGGER, i)
+# See if we should load an existing pedestal
+if len(sys.argv) > 2:
+    # Assume the next entry is a pedestal file
+    if not sys.argv[2] == "NONE":
+        activePedestal = pickle.load(open(sys.argv[2], "rb"))
+else:
+    # Build pedestals by queueing 100 soft triggers
+    N_pedestalSamples = 100
 
-#     # Note that doing it this way keeps you from blasting 100 control packets
-#     # to each board.  So instead of 100 packets, we send 1.
-#     board.transact()
+    #
+    # This code sends 100 control packets.
+    # It is wasteful, but it waits until the event is received at the queue
+    # before sending out another one
+    #
+    
+    # Set for actual A21
+    pedestal_events = []
+    
+    for i in range(0, N_pedestalSamples):
+        # --- Note that these are magic numbers...
+        board.pokenow(0x320, (1 << 6))
 
-# #
-# # STEP 5 - set into data run-mode configuration
-# #
-# ######################################
+        # Add it to the event queue
+        try:
+            pedestal_events.append(eventQueue.get(timeout=0.1))
+        except queue.Empty:
+            print("Timed out on pedestal event %d." % i, file=sys.stderr)
 
-# for board in boards:
-    
-#     # Queue disable of flag to read out all hits on all channels
-#     # (for actual runs now)
-#     board.poke(FULL_READOUT, 0)
-    
-#     # Execute the poke
-#     board.transact()
-    
+    # So now we have some N <= 100 pedestal events.
+    # BEETLEJUICE BEETLEJUICE BEETLEJUICE
+    activePedestal = pedestal.pedestal(pedestal_events)
+
+    # Write it out
+    pickle.dump(activePedestal, open("%s.pedestal" % pedestal_events[0].board_id.hex(), "wb"))
 #
-# STEP 6 - process incoming data, outputting to stdout
+# STEP 5 - process incoming data, outputting to stdout
 #
 ######################################
 
@@ -127,9 +152,16 @@ while(True):
         #
         # Their order is sorted by event['board_id']
         # detection = lappd.eventAggregator(eventQueue, len(boards), timeout=1e-3)
+        #
+        # Coming soon, to a repository near you.....
 
+        # Grab an event
         event = eventQueue.get()
-                
+        
+        # Subtract the pedestal if its defined
+        if activePedestal:
+            activePedestal.subtract(event)
+        
         # # Dump the entire detection in ASCII
         for channel, amplitudes in event.channels.items():
             print("# event number = %d\n# channel = %d\n# samples = %d\n# y_max = %d" % (event.eventNumber, channel, len(amplitudes), (1 << (1 << event.resolution)) - 1))

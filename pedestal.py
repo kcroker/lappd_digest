@@ -44,20 +44,22 @@ class pedestal(object):
         for chan_id in self.chan_list:
             amplitude_lists = []
             for event in self.samples:
-                amplitude_lists.append(event.channels[chan_id]['payload'])
+                amplitude_lists.append(event.channels[chan_id])
 
             # Now compute the pedestals
             self.nobs[chan_id], self.minmax[chan_id], self.mean[chan_id], self.variance[chan_id], self.skewness[chan_id], self.kurtosis[chan_id] = stats.describe(amplitude_lists)
             #self.mean[chan_id] = statistics.mean(amplitude_lists)
             #self.variance[chan_id] = statistics.variance(amplitude_lists, xbar=self.mean[chan_id])
             
-                        
+        # Remove the samples because python can't pickle it
+        del(self.samples)
+        del(self.chan_list)
     #
     # Mutate an event by subtracting off a pedestal
     #
     def subtract(self, event):
         for chan_id, packet in event.channels.items():
-            packet['payload'] = [ (packet['payload'][i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
+            event.channels[chan_id] = [ (packet[i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
             
 #
 # Generate a test pedestal, with normally distributed event samples
