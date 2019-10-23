@@ -39,7 +39,10 @@ globals()['HIT_HEADER_SIZE'] = bitstruct.calcsize(hit_fmt)>>3
 event_fmt = "u16 r48 p8 u3 p5 u16 u16 u8 p8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
-    
+
+# will this be fast?
+bit12 = bitstruct.compile("p4 s12")
+
 #
 # Set a maximum payload size in bytes
 #
@@ -495,6 +498,8 @@ class event(object):
 
             # Populate the list
             tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
+            # XXX DRS4 ONLY VASILY HACK
+            #tmp = [bit12.unpack(payload[i*self.chunks:(i+1)*self.chunks])[0] for i in range(0, len(payload) >> (self.resolution - 3))]
         else:
             # OOO
             # We should technically do a computation here too and not use append...
@@ -536,7 +541,7 @@ def intake(listen_tuple, eventQueue):
             # Grab the maximum IP packet size
             # (and wait until things come in)
             # UDP semantics just pops whatever is there off of the packet stack
-            print("Waiting for packets...", file=sys.stderr)
+            print("Waiting for packets at %s:%d..." % listen_tuple, file=sys.stderr)
             data, addr = s.recvfrom(1 << 16)
             print("Packet received from %s:%d!" % addr, file=sys.stderr)
 
@@ -558,7 +563,8 @@ def intake(listen_tuple, eventQueue):
                     packet = None
                 else:
                     print("Received a hit", file=sys.stderr)
-
+                    print(packet)
+                    
                     # Since we've got a hit, there are more bytes to deal with
                     packet['payload'] = data[HIT_HEADER_SIZE:-2]
 
@@ -633,7 +639,7 @@ def intake(listen_tuple, eventQueue):
                         continue
                     else:
                         print("Received an event", file=sys.stderr)
-
+                        print(packet)
                         # Make a tuple tag for this packet so we can sort it
                         tag = (addr[0], packet['trigger_timestamp_l'])
 

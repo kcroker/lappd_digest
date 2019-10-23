@@ -38,17 +38,20 @@ port = 1444
 # # Get all the boards on the subnet
 # broadcast = '10.0.6.255'
 if len(sys.argv) < 2:
-    print("Usage: %s <target board ip address> [pedestal file | NONE]" % sys.argv[0])
-    print("(NOTE: not specifying a pedestal file or NONE will cause pedestals to be taken)")
+    print("Usage: %s <target board ip address> [pedestal file | NONE | TEST]" % sys.argv[0])
+    print("NOTE: If TEST is specified, no pedestalling is performed.  Events are just processed and output to STDOUT")
     exit(1)
 
-# Open up a control connection
-board = eevee.board(sys.argv[1])
+if len(sys.argv) > 2 and sys.argv[2] == "TEST":
+    pass
+else:
+    # Open up a control connection
+    board = eevee.board(sys.argv[1])
 
-# Aim the board at ourself
-#  This sets the outgoing data path port on the board to port
-#  And sets the destination for data path packets to port
-board.aimNBIC(ourself, port)
+    # Aim the board at ourself
+    #  This sets the outgoing data path port on the board to port
+    #  And sets the destination for data path packets to port
+    board.aimNBIC(ourself, port)
 
 # #
 # # STEP 2 - initialize the boards
@@ -102,11 +105,11 @@ activePedestal = None
 # See if we should load an existing pedestal
 if len(sys.argv) > 2:
     # Assume the next entry is a pedestal file
-    if not sys.argv[2] == "NONE":
+    if not sys.argv[2] == "NONE" and not sys.argv[2] == "TEST":
         activePedestal = pickle.load(open(sys.argv[2], "rb"))
 else:
     # Build pedestals by queueing 100 soft triggers
-    N_pedestalSamples = 100
+    N_pedestalSamples = 10
 
     #
     # This code sends 100 control packets.
@@ -116,11 +119,13 @@ else:
     
     # Set for actual A21
     pedestal_events = []
+    import time
     
     for i in range(0, N_pedestalSamples):
         # --- Note that these are magic numbers...
         board.pokenow(0x320, (1 << 6))
-
+        time.sleep(1)
+        
         # Add it to the event queue
         try:
             pedestal_events.append(eventQueue.get(timeout=0.1))
@@ -157,6 +162,8 @@ while(True):
 
         # Grab an event
         event = eventQueue.get()
+
+        print("Event received on the queue, dumping to stdout...", file=sys.stderr)
         
         # Subtract the pedestal if its defined
         if activePedestal:
