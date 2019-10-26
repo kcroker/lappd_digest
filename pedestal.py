@@ -13,9 +13,14 @@ import statistics
 # because maybe you don't want to take pedestals.
 # 
 
+import datetime
+
 class pedestal(object):
 
     def __init__(self, samples):
+
+        # Some board information
+        self.board_id = samples[0].board_id
 
         # Event sample from which the pedestal is constructed
         self.samples = samples

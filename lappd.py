@@ -314,7 +314,7 @@ class event(object):
         # This will be used by higher levels to aggreate many responses from many boards.
         # Presumably, this number is synchronized via other external
         # means across all participating boards.
-        self.eventNumber = packet['evt_number']
+        self.evt_number = packet['evt_number']
 
         # Store the board id, jesus
         self.board_id = packet['board_id']
@@ -424,7 +424,9 @@ class event(object):
             # OOO we can write torn offsets directly here
             for offset, ampls in subhits:
 
-                print(ampls, file=sys.stderr)
+                # DDD
+                # print(ampls, file=sys.stderr)
+                
                 # Don't know how much optimiation python does with minimizing the number of
                 # lookups on len, which is O(N)...
                 len_ampls = len(ampls)
@@ -498,8 +500,7 @@ class event(object):
 
             # Populate the list
             tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
-            # XXX DRS4 ONLY VASILY HACK
-            #tmp = [bit12.unpack(payload[i*self.chunks:(i+1)*self.chunks])[0] for i in range(0, len(payload) >> (self.resolution - 3))]
+
         else:
             # OOO
             # We should technically do a computation here too and not use append...
@@ -532,11 +533,16 @@ def intake(listen_tuple, eventQueue):
     # Keep track of events in progress and hits that don't belong to any events
     currentEvents = {}
     orphanedHits = []
+
+    # Release the semaphore lock
+    print("Releasing initialization lock...", file=sys.stderr)
+    eventQueue.put(Exception("Release lock"))
     
     # Server loop
     print("Entering service loop", file=sys.stderr)
     
     while True:
+
         try:
             # Grab the maximum IP packet size
             # (and wait until things come in)
@@ -563,7 +569,9 @@ def intake(listen_tuple, eventQueue):
                     packet = None
                 else:
                     print("Received a hit", file=sys.stderr)
-                    print(packet)
+
+                    ## DDD 
+                    # print(packet, file=sys.stderr)
                     
                     # Since we've got a hit, there are more bytes to deal with
                     packet['payload'] = data[HIT_HEADER_SIZE:-2]
@@ -639,7 +647,7 @@ def intake(listen_tuple, eventQueue):
                         continue
                     else:
                         print("Received an event", file=sys.stderr)
-                        print(packet)
+                        print(packet, file=sys.stderr)
                         # Make a tuple tag for this packet so we can sort it
                         tag = (addr[0], packet['trigger_timestamp_l'])
 
@@ -688,6 +696,6 @@ def intake(listen_tuple, eventQueue):
 
         except SystemExit:
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
-            break
+            break        
 
         
