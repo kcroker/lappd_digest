@@ -171,5 +171,7 @@ if args.pedestal:
 
 # Send the death signal to the child and wait for it
 print("Sending death signal to intake process...", file=sys.stderr)
-eventQueue.put(Exception("Death signal"))
+from os import kill
+from signal import SIGINT
+kill(intakeProcess.pid, SIGINT)
 intakeProcess.join()
