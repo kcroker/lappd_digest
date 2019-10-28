@@ -18,27 +18,35 @@ import lappd
 # y[200:300] = m * (x - m) + channel
 # etc.
 #
-def generateSubhits(M, channel, samples, resolution, max_samples):
+def generateSubhits(M, channel, samples, resolution, base_offset, max_samples):
     subhits = []
 
     for m in range(0, M):
-        dom = np.linspace(0, 1, math.ceil(((m+1)/M)*samples))
-        offset = m*samples + 10*m
-        subhit = [ math.floor((2 << (1 << resolution) - 1) * ((m+1) * (t - m/M) + channel) / 2.0 / (M + channel)) for t in dom]
+
+        offset = base_offset + m*(samples + 50)
+        if offset > max_samples-1:
+            print("WARNING: offset exceeded maximum, wrapping", file=sys.stderr)
+            offset = offset % max_samples
+
+        print("Subhit offset is: %d" % offset, file=sys.stderr)
+        
+        # Just do a straight line omg
+        subhit = [ (m+1)*(t - offset) + channel*100 for t in range(offset, offset+samples) ]
+        
         subhits.append((offset, subhit))
 
     print(subhits)
     return subhits
 
 # Event maker, event maker, make me an event
-def linearTestEvent(channels, subhits, samples, resolution):
+def linearTestEvent(channels, subhits, samples, resolution, base_offset):
 
     chan_list = [i for i in range(0, channels)]
-    subhit_list = [generateSubhits(subhits, chan, samples, resolution, 1024) for chan in chan_list]
+    subhit_list = [generateSubhits(subhits, chan, samples, resolution, base_offset, lappd.HIT_FOOTER_MAGIC) for chan in chan_list]
     
     # Produce the event
     # Packets are in backwards order: all orphaned hits, followed by the event
-    rawpackets = lappd.event.generateEvent(666, resolution, chan_list, subhit_list, 1024)
+    rawpackets = lappd.event.generateEvent(666, resolution, chan_list, subhit_list, lappd.HIT_FOOTER_MAGIC)
 
     # Time order the packets?
     #rawpackets = rawpackets.reverse()
@@ -80,7 +88,20 @@ s.connect((socket.gethostbyname(sys.argv[1]), int(sys.argv[2])))
 #
 # --> PASSED
 ############################################
-run = linearTestEvent(2, 4, 200, 4)
+#run = linearTestEvent(1, 3, 200, 4)
+
+# Wrap-around behaviour (with FOOTER_MAGIC=1000)
+# VERIFIED
+#run = linearTestEvent(1, 1, 2000, 4, 900)
+
+# One wrap around, and a a further hit that does not wrap around
+# but does overwrite (FM=1000)
+# VERIFIED
+# run = linearTestEvent(1, 2, 500, 4, 900)
+
+
+run = linearTestEvent(1, 3, 300, 4, 575) + linearTestEvent(1, 4, 300, 4, 575)
+
 
 for packet in run:
     s.send(packet)

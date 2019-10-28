@@ -215,7 +215,7 @@ class event(object):
 
                 # Add this subhit fragment
                 fragments.append(tmp)
-                print("Appended fragment %d" % (seqn + i), file=sys.stderr)
+                print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
                 
                 # Update the offset, since we fragment as if we had back to back offsets
                 if event.resolution - 3 >= 0:
@@ -223,15 +223,21 @@ class event(object):
                 else:
                     offset += LAPPD_MTU << (3 - event.resolution)
 
+                # Sanitize in case we overran
+                offset = offset % HIT_FOOTER_MAGIC
+
             # And do the final fragment
             if num_fragments > 1:
                 i += 1
-            
+
+                # XXX This number is necessary for correct generation
+                offset = offset % HIT_FOOTER_MAGIC
+
             fragment['seq'] = seqn + i
             fragment['drs4_offset'] = offset
             fragment['payload'] = subhit_total_payload[i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
             fragments.append(fragment)
-            print("Appended fragment %d" % (seqn + i), file=sys.stderr)
+            print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
 
 #            import pdb
 #            pdb.set_trace()
@@ -426,7 +432,8 @@ class event(object):
 
                 # DDD
                 # print(ampls, file=sys.stderr)
-                
+
+                print("\tWriting at offset %d" % offset, ampls, file=sys.stderr)
                 # Don't know how much optimiation python does with minimizing the number of
                 # lookups on len, which is O(N)...
                 len_ampls = len(ampls)
@@ -447,11 +454,12 @@ class event(object):
 
             # All subhits are now in place.
             
-            # Are we trying to zero offset?  
+            # Are we trying to zero offset?
+            # XXX TEAR OFF
             if self.keep_offset:
 
                 # This is the first sampled capacitor position, in time
-                tare = subhit_ampls[0][0]
+                tare = subhits[0][0]
                 print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
                 
                 # Never do a modulo in a loop computation, god
