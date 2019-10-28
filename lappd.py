@@ -440,7 +440,7 @@ class event(object):
                 # DDD
                 # print(ampls, file=sys.stderr)
 
-                print("\tWriting at offset %d" % offset, ampls, file=sys.stderr)
+                #print("\tWriting at offset %d" % offset, ampls, file=sys.stderr)
                 # Don't know how much optimiation python does with minimizing the number of
                 # lookups on len, which is O(N)...
                 len_ampls = len(ampls)

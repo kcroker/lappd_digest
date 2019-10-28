@@ -61,6 +61,10 @@ if not args.N > 0:
 if args.i < 0:
     raise Exception("Interval must be positive")
 
+# If we are pedestalling, force persistent offsets
+if args.pedestal:
+    args.offset = True
+    
 #
 # STEP 1 - get control connections
 #
