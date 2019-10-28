@@ -455,8 +455,7 @@ class event(object):
             # All subhits are now in place.
             
             # Are we trying to zero offset?
-            # XXX TEAR OFF
-            if self.keep_offset:
+            if not self.keep_offset:
 
                 # This is the first sampled capacitor position, in time
                 tare = subhits[0][0]
