@@ -19,6 +19,10 @@ class pedestal(object):
 
     def __init__(self, samples):
 
+        # Did we receive any samples?
+        if not len(samples):
+            raise Exception("Did not receive any samples!")
+        
         # Some board information
         self.board_id = samples[0].board_id
 
@@ -28,7 +32,7 @@ class pedestal(object):
         # Use the first event to determine the list of channels
         self.chan_list = samples[0].channels.keys()
 
-        # Sanity check and homogeneiety check
+        # Sanity checks on the pedestal samples
         for sample in samples:
             
             if not isinstance(sample, lappd.event):
@@ -36,7 +40,9 @@ class pedestal(object):
             
             if not self.chan_list == sample.channels.keys():
                 raise Exception("Provided sample events for pedestaling have inhomogeneous channel content.  This .... is ... U N A C C E P T A B L E E E E ---- U N A C C E P T A B L E E E E E E E")
-
+            if not sample.keep_offset:
+                raise Exception("Refusing to build pedestals with torn data (ROI mode)")
+            
         # Set up for pedestals
         self.nobs = {}
         self.minmax = {}
@@ -53,9 +59,11 @@ class pedestal(object):
 
             # Now compute the pedestals
             self.nobs[chan_id], self.minmax[chan_id], self.mean[chan_id], self.variance[chan_id], self.skewness[chan_id], self.kurtosis[chan_id] = stats.describe(amplitude_lists)
-            #self.mean[chan_id] = statistics.mean(amplitude_lists)
-            #self.variance[chan_id] = statistics.variance(amplitude_lists, xbar=self.mean[chan_id])
-            
+
+            # Take the square root of the variance
+            # But then its still called variance when its not...
+            # self.variance = np.sqrt(self.variance)
+                        
         # Remove the samples because python can't pickle it
         del(self.samples)
         del(self.chan_list)
@@ -63,8 +71,16 @@ class pedestal(object):
     # Mutate an event by subtracting off a pedestal
     #
     def subtract(self, event):
-        for chan_id, packet in event.channels.items():
-            event.channels[chan_id] = [ (packet[i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
+
+        # # Has the event been torn?
+        # if not event.keep_offset:
+        #     # It has, so we need to use the offset to
+        #     # correctly pedestal
+        #     adjust = lambda x,delta : if delta < 0 
+        #     pass
+        # else:
+        for chan_id, amplitudes in event.channels.items():
+            event.channels[chan_id] = [ (amplitudes[i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
             
 #
 # Generate a test pedestal, with normally distributed event samples

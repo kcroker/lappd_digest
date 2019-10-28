@@ -336,6 +336,7 @@ class event(object):
         self.complete = False
 
         # Should I keep any offsets present in the data?
+        self.offset = None
         self.keep_offset = keep_offset
         
         # Am I pedestalling?
@@ -407,6 +408,12 @@ class event(object):
             # This is the first fragment
             self.channels[packet['channel_id']] = event.hitstash(packet)
 
+        # Is this the first packet in the sequence?
+        if packet['seq'] == 0 and self.offset is None:
+
+            # Remember this offset (for pedestaling)
+            self.offset = packet['drs4_offset']
+            
         # A quick alias
         current_hit = self.channels[packet['channel_id']]
         
@@ -525,7 +532,7 @@ class event(object):
         return tmp
         
 # Multiprocess fork() entry point
-def intake(listen_tuple, eventQueue):
+def intake(listen_tuple, eventQueue, keep_offset=False):
 
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -578,7 +585,7 @@ def intake(listen_tuple, eventQueue):
                     print("Received a hit", file=sys.stderr)
 
                     ## DDD 
-                    # print(packet, file=sys.stderr)
+                    print(packet, file=sys.stderr)
                     
                     # Since we've got a hit, there are more bytes to deal with
                     packet['payload'] = data[HIT_HEADER_SIZE:-2]
@@ -663,7 +670,7 @@ def intake(listen_tuple, eventQueue):
                             print("Registering new event from %s, timestamp %d" % tag, file=sys.stderr)
                             
                             # Make an event from this packet
-                            currentEvents[tag] = event(packet)
+                            currentEvents[tag] = event(packet, keep_offset)
 
                             # Lambda function which will claim a matching orphan and signal the match success
                             claimed = lambda orphan : currentEvents[tag].claim(orphan) if (orphan['addr'], orphan['trigger_timestamp_l']) == tag else False

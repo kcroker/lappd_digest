@@ -48,10 +48,10 @@ parser.add_argument('N', metavar='NUM_SAMPLES', type=int, help='The number of sa
 parser.add_argument('i', metavar='INTERVAL', type=float, help='The interval (seconds) between software triggers')
 
 parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals')
-parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming data')
+parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
 parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
 parser.add_argument('-l', '--listen', action="store_true", help='Ignore board, interval, and samples.  Instead, passively listen for incoming data.')
-
+parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events')
 args = parser.parse_args()
 
 # Simple sanity check
@@ -100,7 +100,7 @@ eventQueue = multiprocessing.Queue()
 # Since we are in UNIX, this will operate via a fork()
 intakeProcess = None
 if __name__ == '__main__':
-    intakeProcess = multiprocessing.Process(target=lappd.intake, args=((listen_here, args.aim), eventQueue))
+    intakeProcess = multiprocessing.Process(target=lappd.intake, args=((listen_here, args.aim), eventQueue, args.offset))
     intakeProcess.start()
 
 # The reconstructor will push an Exception object on the queue when the socket is open
