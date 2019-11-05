@@ -427,8 +427,10 @@ class event(object):
         # Keep track of our ... greatest hits ;)
         self.channels = {}
 
-        # How many hits am I expecting?
+        # How many hit channels am I expecting?
         self.remaining_hits = packet['num_hits']
+
+        # How many totla bytes am I expecting?
         self.remaining_bytes = packet['evt_size']
         
         # Has all of my data arrived?
@@ -507,11 +509,17 @@ class event(object):
             # This is the first fragment
             self.channels[packet['channel_id']] = event.hitstash(packet)
 
-        # Is this the first packet in the sequence?
-        if packet['seq'] == 0 and self.offset is None:
+        # #
+        # # Shifting to use fully incremental sequence numbers
+        # #
+        # # Is this the first packet in the sequence?
+        # if packet['seq'] < self.minseq:
 
-            # Remember this offset (for pedestaling)
-            self.offset = packet['drs4_offset']
+        #     # Remember this offset (for pedestaling)
+        #     self.offset = packet['drs4_offset']
+
+        #     # Remember this for future comparison
+        #     self.minseq = packet['seq']
             
         # A quick alias
         current_hit = self.channels[packet['channel_id']]
@@ -523,10 +531,17 @@ class event(object):
             self.remaining_bytes -= current_hit.receivedBytes
             
             print("All expected hit bytes received on channel %d.  Unpacking..." % packet['channel_id'], file=sys.stderr)
-            
+
             # Notice that we sort the dictionary by sequence numbers!
             subhits = [(offnpay[0], self.unpack(offnpay[1])) for seq, offnpay in sorted(current_hit.payloads.items(), key=lambda x:x[0])]
 
+            # Since this is sorted, the offset of the lowest sequence number is (hopefully)
+            # the true offset.  This will be wrong if the first packet is dropped...
+            #
+            # (With the sequence numbers being fully incremental, you'll be able to
+            #  reconstruct capacitor positions, but not have any time reference.)
+            self.offset = subhits[0][0]
+            
             # Allocate space for the entire dero
             # Note that -1 signifies no data received, either due to packet drop or that the
             # device didn't report it
