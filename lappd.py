@@ -508,18 +508,6 @@ class event(object):
 
             # This is the first fragment
             self.channels[packet['channel_id']] = event.hitstash(packet)
-
-        # #
-        # # Shifting to use fully incremental sequence numbers
-        # #
-        # # Is this the first packet in the sequence?
-        # if packet['seq'] < self.minseq:
-
-        #     # Remember this offset (for pedestaling)
-        #     self.offset = packet['drs4_offset']
-
-        #     # Remember this for future comparison
-        #     self.minseq = packet['seq']
             
         # A quick alias
         current_hit = self.channels[packet['channel_id']]
