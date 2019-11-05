@@ -9,7 +9,6 @@ os.environ['EEVEE_SRC_PATH'] = "./eevee"
 
 import eevee
 import lappd
-import pedestal
 import multiprocessing
 import pickle
 import queue
@@ -20,12 +19,7 @@ import socket
 # Utility function to dump a pedestal subtracted event
 # Note that it MUTATES the events!!
 #
-def dump(event, activePedestal):
-    # Subtract the pedestal if its defined
-    if activePedestal:
-        activePedestal.subtract(event)
-        print("# pedestal = %s" % activePedestal.board_id)
-            
+def dump(event):
     # # Dump the entire detection in ASCII
     for channel, amplitudes in event.channels.items():
         print("# event number = %d\n# channel = %d\n# samples = %d\n# y_max = %d" % (event.evt_number, channel, len(amplitudes), (1 << (1 << event.resolution)) - 1))
@@ -47,11 +41,13 @@ parser.add_argument('board', metavar='IP_ADDRESS', type=str, help='IP address of
 parser.add_argument('N', metavar='NUM_SAMPLES', type=int, help='The number of samples to request')
 parser.add_argument('i', metavar='INTERVAL', type=float, help='The interval (seconds) between software triggers')
 
-parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals')
+parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
 parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
 parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
-parser.add_argument('-l', '--listen', action="store_true", help='Ignore board, interval, and samples.  Instead, passively listen for incoming data.')
-parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events')
+parser.add_argument('-l', '--listen', action="store_true", help='Passively listen at IP_ADDRESS for incoming data.  Interval and samples are ignored.')
+parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events.  (Order by capacitor, instead of ordering by time)')
+parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before listening for events')
+                    
 args = parser.parse_args()
 
 # Simple sanity check
@@ -104,9 +100,9 @@ eventQueue = multiprocessing.Queue()
 # Since we are in UNIX, this will operate via a fork()
 intakeProcess = None
 if __name__ == '__main__':
-    intakeProcess = multiprocessing.Process(target=lappd.intake, args=((listen_here, args.aim), eventQueue, args.offset))
+    intakeProcess = multiprocessing.Process(target=lappd.intake, args=((listen_here, args.aim), eventQueue, args.offset, args.subtract))
     intakeProcess.start()
-
+    
 # The reconstructor will push an Exception object on the queue when the socket is open
 # and ready to receive data.  Use the existing queue, so we don't need to make a new lock
 if not isinstance(eventQueue.get(), Exception):
@@ -119,12 +115,6 @@ print("Lock passed, intake process is now listening...", file=sys.stderr)
 #
 ######################################
 
-activePedestal = None
-
-# See if we should load an existing pedestal
-if args.subtract:
-    activePedestal = pickle.load(open(args.subtract, "rb"))
-
 # Are we just listening?
 while(args.listen):
     try:
@@ -133,7 +123,7 @@ while(args.listen):
 
         # Output it
         print("Event %d received on the queue, dumping to stdout..." % event.evt_number, file=sys.stderr)
-        dump(event, activePedestal)
+        dump(event)
     
     except Exception as e:
         import traceback
@@ -159,7 +149,7 @@ for i in range(0, args.N):
         events.append(event)
 
         # Output the ascii dump
-        dump(event, activePedestal)
+        dump(event)
     except queue.Empty:
         print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
 
@@ -167,7 +157,7 @@ for i in range(0, args.N):
 if args.pedestal:
 
     # BEETLEJUICE BEETLEJUICE BEETLEJUICE
-    activePedestal = pedestal.pedestal(events)
+    activePedestal = event.pedestal(events)
 
     # Write it out
     if len(events) > 0:
