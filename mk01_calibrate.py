@@ -21,11 +21,11 @@ import socket
 #
 def dump(event):
     # # Dump the entire detection in ASCII
+    print("# event number = %d\n# y_max = %d\n# drs4_offset = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1, event.offset))
     for channel, amplitudes in event.channels.items():
-        print("# event number = %d\n# channel = %d\n# samples = %d\n# y_max = %d" % (event.evt_number, channel, len(amplitudes), (1 << (1 << event.resolution)) - 1))
         for t, ampl in enumerate(amplitudes):
-            print("%d %d" % (t, ampl))
-        print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
+            print("%d %d %d" % (t, ampl, channel))
+        #print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
         
     # End this detection (because \n, this will have an additional newline)
     print("# END OF EVENT %d\n" % event.evt_number)
