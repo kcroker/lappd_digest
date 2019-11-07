@@ -21,11 +21,12 @@ import socket
 #
 def dump(event):
     # # Dump the entire detection in ASCII
-    print("# event number = %d\n# y_max = %d\n# drs4_offset = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1, event.offset))
+    print("# event number = %d\n# y_max = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1))
     for channel, amplitudes in event.channels.items():
+        print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
         for t, ampl in enumerate(amplitudes):
             print("%d %d %d" % (t, ampl, channel))
-        #print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
+        print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
         
     # End this detection (because \n, this will have an additional newline)
     print("# END OF EVENT %d\n" % event.evt_number)
@@ -133,7 +134,22 @@ while(args.listen):
 
 events = []
 import time
-    
+
+#
+# If we are pedestalling, make sure that that the board is in full
+# readout mode
+# XXX Magic numbers... this needs to be standardized via an
+# This is LAPPD specific stuff now.
+# Very bad design practice.
+#
+readout_mode = board.peeknow(0x328)
+if args.pedestal:
+
+    # Force full readout, if its not in there
+    if(readout_mode < 1025):
+        print("WARNING: Board was not in full readout (ROI set to %d).  Forcing..." % readout_mode, file=sys.stderr)
+        board.pokenow(0x328, 1025)
+                  
 for i in range(0, args.N):
     # --- Note that these are magic numbers...
     board.pokenow(0x320, (1 << 6))
@@ -163,6 +179,9 @@ if args.pedestal:
     if len(events) > 0:
         pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
 
+    # Restore board state
+    board.pokenow(0x328, readout_mode)
+    
 # Send the death signal to the child and wait for it
 print("Sending death signal to intake process...", file=sys.stderr)
 from os import kill

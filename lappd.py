@@ -173,6 +173,9 @@ class event(object):
         # Return a pedestal subtracted list of amplitudes
         #
         def subtract(self, amplitudes, chan_id):
+            if not chan_id in self.mean:
+                raise Exception("Given pedestal does not define channel %d" % chan_id)
+            
             return [ (amplitudes[i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
             
         #
@@ -436,8 +439,10 @@ class event(object):
         # Has all of my data arrived?
         self.complete = False
 
+        # A list of offsets measured for each channel
+        self.offsets = {}
+
         # Should I keep any offsets present in the data?
-        self.offset = None
         self.keep_offset = keep_offset
         
         # Am I pedestalling?
@@ -528,7 +533,8 @@ class event(object):
             #
             # (With the sequence numbers being fully incremental, you'll be able to
             #  reconstruct capacitor positions, but not have any time reference.)
-            self.offset = subhits[0][0]
+            print("Setting the overall offset for channel %d to %d" % (packet['channel_id'], subhits[0][0]), file=sys.stderr)
+            self.offsets[packet['channel_id']] = subhits[0][0]
             
             # Allocate space for the entire dero
             # Note that -1 signifies no data received, either due to packet drop or that the
