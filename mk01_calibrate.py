@@ -14,6 +14,7 @@ import pickle
 import queue
 import argparse
 import socket
+import time
 
 #
 # Utility function to dump a pedestal subtracted event
@@ -48,7 +49,9 @@ parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, h
 parser.add_argument('-l', '--listen', action="store_true", help='Passively listen at IP_ADDRESS for incoming data.  Interval and samples are ignored.')
 parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events.  (Order by capacitor, instead of ordering by time)')
 parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before listening for events')
-                    
+parser.add_argument('-q', '--quiet', action="store_true", help='Do not write anything to stdout (useful for profiling)')
+parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
+
 args = parser.parse_args()
 
 # Simple sanity check
@@ -83,6 +86,22 @@ else:
     # Convenience shortcut
     listen_here = board.s.getsockname()[0]
 
+    #
+    # If we are pedestalling, make sure that that the board is in full
+    # readout mode
+    # XXX Magic numbers... this needs to be standardized via an
+    # This is LAPPD specific stuff now.
+    # Very bad design practice.
+    #                  
+    readout_mode = board.peeknow(0x328)
+    if args.pedestal:
+
+        # Force full readout, if its not in there
+        if(readout_mode < 1025):
+            print("WARNING: Board was not in full readout (ROI set to %d).  Forcing..." % readout_mode, file=sys.stderr)
+            board.pokenow(0x328, 1025)
+
+
 #
 # STEP 2 - fork an event reconstructor
 #
@@ -96,7 +115,8 @@ else:
 #
 
 # Required for multiprocess stuff
-eventQueue = multiprocessing.Queue()
+# Try using a manager to handle weird bottleneck?
+eventQueue = multiprocessing.Queue(args.N)
 
 # Since we are in UNIX, this will operate via a fork()
 intakeProcess = None
@@ -117,42 +137,38 @@ print("Lock passed, intake process is now listening...", file=sys.stderr)
 ######################################
 
 # Are we just listening?
-while(args.listen):
-    try:
-        # Grab an event
-        event = eventQueue.get()
+if args.listen:
+    while args.N > 0:
+        try:
+            # Grab an event
+            event = eventQueue.get()
 
-        # Output it
-        print("Event %d received on the queue, dumping to stdout..." % event.evt_number, file=sys.stderr)
-        dump(event)
-    
-    except Exception as e:
-        import traceback
-        traceback.print_exc(file=sys.stderr)
+            # Output it
+            print("Event %d:\n\tReconstruction time: %e seconds\n\tQueue delay: %e seconds" % (event.evt_number, event.finish - event.start, time.time() - event.prequeue), file=sys.stderr)
+
+            if not args.quiet:
+                dump(event)
+                
+            args.N -= 1
+
+            # Explicitly free the memory
+            eventQueue.task_done()
+            del(event)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc(file=sys.stderr)
 
 # So we are not just listening, lets do something
 
 events = []
 import time
 
-#
-# If we are pedestalling, make sure that that the board is in full
-# readout mode
-# XXX Magic numbers... this needs to be standardized via an
-# This is LAPPD specific stuff now.
-# Very bad design practice.
-#
-readout_mode = board.peeknow(0x328)
-if args.pedestal:
-
-    # Force full readout, if its not in there
-    if(readout_mode < 1025):
-        print("WARNING: Board was not in full readout (ROI set to %d).  Forcing..." % readout_mode, file=sys.stderr)
-        board.pokenow(0x328, 1025)
-                  
 for i in range(0, args.N):
     # --- Note that these are magic numbers...
-    board.pokenow(0x320, (1 << 6))
+    if not args.external:
+        # Suppress board readback and response!
+        board.pokenow(0x320, (1 << 6), readback=False, silent=True) #, silent=True, readback=False)
     
     # Sleep for the specified delay
     time.sleep(args.i)
@@ -160,12 +176,14 @@ for i in range(0, args.N):
     # Add it to the event queue
     try:
         event = eventQueue.get(timeout=0.1)
-        print("Received event %d, in response to trigger %d." % (event.evt_number, i), file=sys.stderr)
+        print("Received event %d" % (event.evt_number), file=sys.stderr)
         # Push it onto the processing queue
         events.append(event)
 
         # Output the ascii dump
-        dump(event)
+        if not args.quiet:
+            dump(event)
+            
     except queue.Empty:
         print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
 
@@ -181,9 +199,11 @@ if args.pedestal:
 
     # Restore board state
     board.pokenow(0x328, readout_mode)
-    
+
+# If doing hardware triggers, the event queue is probably
+# loaded with events
 # Send the death signal to the child and wait for it
-print("Sending death signal to intake process...", file=sys.stderr)
+print("Sending interrupt signal to intake process (get out of recvfrom())...", file=sys.stderr)
 from os import kill
 from signal import SIGINT
 kill(intakeProcess.pid, SIGINT)

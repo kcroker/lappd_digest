@@ -8,6 +8,8 @@ import socket
 import random
 import math
 import pickle
+import queue
+import time
 
 # Define the format of a hit packet
 #  HIT_MAGIC (16 bits) (2 bytes)
@@ -41,8 +43,9 @@ event_fmt = "u16 r48 p8 u3 p5 u16 u16 u8 p8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
 
-# will this be fast?
-bit12 = bitstruct.compile("p4 s12")
+# Hack to do things fast(er)?
+import struct
+doit = struct.Struct(">512h")
 
 #
 # Set a maximum payload size in bytes
@@ -83,7 +86,7 @@ class event(object):
                 # Initialize some things
                 self.targetLength = packet['hit_payload_size']
                 self.max_samples = packet['max_samples']
-                print("New subhit stash for channel %d" % packet['channel_id'], file=sys.stderr)
+                #print("New subhit stash for channel %d" % packet['channel_id'], file=sys.stderr)
                 
             else:
                 # Verify it
@@ -108,7 +111,7 @@ class event(object):
                 print(packet)
                 raise Exception("Received %d of expected %d bytes!  Too many!" % (self.receivedBytes, self.targetLength))
 
-            print("Stashed seq %d for channel %d with %d bytes.  %d remaining bytes" % (packet['seq'], packet['channel_id'], len(packet['payload']), self.targetLength - self.receivedBytes), file=sys.stderr)
+            #            print("Stashed seq %d for channel %d with %d bytes.  %d remaining bytes" % (packet['seq'], packet['channel_id'], len(packet['payload']), self.targetLength - self.receivedBytes), file=sys.stderr)
                   
         def completed(self):
             return self.receivedBytes == self.targetLength
@@ -210,7 +213,7 @@ class event(object):
             # Amplitude list for generateEvent() needs to be order preserving, or else the zip() will get the orders
             # screwed up
 
-            print("Pedestal: %d channels, with %d samples each @ %d-bit" % (len(chan_list), numsamples, 1 << resolution), file=sys.stderr)
+            #            print("Pedestal: %d channels, with %d samples each @ %d-bit" % (len(chan_list), numsamples, 1 << resolution), file=sys.stderr)
             return lappd.event.generateEvent(555, resolution, chan_list, [0]*len(chan_list), ampl_list)
 
         
@@ -317,7 +320,7 @@ class event(object):
 
                 # Add this subhit fragment
                 fragments.append(tmp)
-                print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
+                #print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
                 
                 # Update the offset, since we fragment as if we had back to back offsets
                 if event.resolution - 3 >= 0:
@@ -339,7 +342,7 @@ class event(object):
             fragment['drs4_offset'] = offset
             fragment['payload'] = subhit_total_payload[i*LAPPD_MTU:i*LAPPD_MTU + final_fragment_length]
             fragments.append(fragment)
-            print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
+            #print("Appended fragment %d, offset %d" % ((seqn + i), offset), file=sys.stderr)
 
 #            import pdb
 #            pdb.set_trace()
@@ -447,6 +450,9 @@ class event(object):
         
         # Am I pedestalling?
         self.activePedestal = activePedestal
+
+        # When was I made (profiling debugging)
+        self.start = time.time()
         
         # Protocol encodes resolution at the event level
         # (Technically, its a channel property.)
@@ -489,7 +495,7 @@ class event(object):
     #
     def claim(self, packet):
 
-        print("Claiming a hit from %s with timestamp %d" % (packet['addr'], packet['trigger_timestamp_l']), file=sys.stderr)
+        #print("Claiming a hit from %s with timestamp %d" % (packet['addr'], packet['trigger_timestamp_l']), file=sys.stderr)
 
         # Sanity check the length
         if len(packet['payload']) == 0:
@@ -503,13 +509,13 @@ class event(object):
         # Route this hit to the appropriate channel
         if packet['channel_id'] in self.channels:
 
-            print("Hit fragment %d routed to existing channel %d" % (packet['seq'], packet['channel_id']), file=sys.stderr)
+            #print("Hit fragment %d routed to existing channel %d" % (packet['seq'], packet['channel_id']), file=sys.stderr)
 
             # Store this fragment in this channel's hit stash
             self.channels[packet['channel_id']].stash(packet)
             
         else:
-            print("Hit establishing data for channel %d, via fragment %d" % (packet['channel_id'], packet['seq']), file=sys.stderr)
+            #print("Hit establishing data for channel %d, via fragment %d" % (packet['channel_id'], packet['seq']), file=sys.stderr)
 
             # This is the first fragment
             self.channels[packet['channel_id']] = event.hitstash(packet)
@@ -523,7 +529,7 @@ class event(object):
             # Remove these bytes from the total expected over all channels
             self.remaining_bytes -= current_hit.receivedBytes
             
-            print("All expected hit bytes received on channel %d.  Unpacking..." % packet['channel_id'], file=sys.stderr)
+            #print("All expected hit bytes received on channel %d.  Unpacking..." % packet['channel_id'], file=sys.stderr)
 
             # Notice that we sort the dictionary by sequence numbers!
             subhits = [(offnpay[0], self.unpack(offnpay[1])) for seq, offnpay in sorted(current_hit.payloads.items(), key=lambda x:x[0])]
@@ -533,7 +539,7 @@ class event(object):
             #
             # (With the sequence numbers being fully incremental, you'll be able to
             #  reconstruct capacitor positions, but not have any time reference.)
-            print("Setting the overall offset for channel %d to %d" % (packet['channel_id'], subhits[0][0]), file=sys.stderr)
+            #print("Setting the overall offset for channel %d to %d" % (packet['channel_id'], subhits[0][0]), file=sys.stderr)
             self.offsets[packet['channel_id']] = subhits[0][0]
             
             # Allocate space for the entire dero
@@ -571,7 +577,7 @@ class event(object):
 
             # Are we pedestalling?  Do it now before we adjust the zero offset
             if self.activePedestal:
-                print("Subtracting pedestals from data before taring...", file=sys.stderr)
+                #print("Subtracting pedestals from data before taring...", file=sys.stderr)
                 amplitudes = self.activePedestal.subtract(amplitudes, packet['channel_id'])
                 
             # Are we trying to zero offset?
@@ -579,7 +585,7 @@ class event(object):
 
                 # This is the first sampled capacitor position, in time
                 tare = subhits[0][0]
-                print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
+                #print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
                 
                 # Never do a modulo in a loop computation, god
                 # Since we are not memory limited in 2019, just do an offset copy
@@ -607,7 +613,7 @@ class event(object):
         # Did we just complete our event?
         if not self.remaining_hits or not self.remaining_bytes:
 
-            print("Event completed!", file=sys.stderr)
+            #print("Event completed!", file=sys.stderr)
             # Flag that we are ready to be put on the eventQueue
             self.complete = True
 
@@ -625,8 +631,10 @@ class event(object):
         # or unpacking bits into integers
         if self.chunks > 0:
 
+            tmp = doit.unpack(payload)
             # Populate the list
-            tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
+            # SLOW AS BALLS
+            #tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
 
         else:
             # OOO
@@ -680,9 +688,9 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
             # Grab the maximum IP packet size
             # (and wait until things come in)
             # UDP semantics just pops whatever is there off of the packet stack
-            print("Waiting for packets at %s:%d..." % listen_tuple, file=sys.stderr)
-            data, addr = s.recvfrom(1 << 16)
-            print("Packet received from %s:%d!" % addr, file=sys.stderr)
+            #print("Waiting for packets at %s:%d..." % listen_tuple, file=sys.stderr)
+            data, addr = s.recvfrom(1500)
+            #print("Packet received from %s:%d!" % addr, file=sys.stderr)
 
             #
             # Note that bitstruct is only useful for the header, 
@@ -701,10 +709,10 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                 if not packet['magic'] == HIT_MAGIC:
                     packet = None
                 else:
-                    print("Received a hit", file=sys.stderr)
+                    #print("Received a hit", file=sys.stderr)
 
                     ## DDD 
-                    print(packet, file=sys.stderr)
+                    #print(packet, file=sys.stderr)
                     
                     # Since we've got a hit, there are more bytes to deal with
                     packet['payload'] = data[HIT_HEADER_SIZE:-2]
@@ -719,7 +727,7 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                     # Do we have an event to associate this with?
                     if tag in currentEvents:
 
-                        print("Event exists for %s at %d, claiming." % tag, file=sys.stderr)
+                        #print("Event exists for %s at %d, claiming." % tag, file=sys.stderr)
                         
                         # We do.  Claim this hit
                         myevent = currentEvents[tag]
@@ -730,12 +738,16 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                         # Did we complete one?
                         if myevent.complete:
 
+                            # For profiling of event reconstruction and
+                            # queueing
+                            myevent.finish = time.time()
+                            
                             # OOO
                             # Push the payload completed event onto the queue
                             # Probably don't want or need to ship the object
                             # A dictionary of data sufficient for the aggregator level
                             # should be fine
-                            print("Shipping completed packet...\n\n", file=sys.stderr)
+                            #print("Shipping completed event...\n\n", file=sys.stderr)
 
                             # Strip unnecessary things from the event
                             # and channels.
@@ -754,9 +766,14 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                             #        del(channel['addr'])
 
                             # Push it to the other process
-                            eventQueue.put(myevent)
+                            try:
+                                myevent.prequeue = time.time()
+                                eventQueue.put(myevent, block=False)
+                            except queue.Full as e:
+                                print(e)
 
                             # Remove this from the list of current events
+                            # even if we couldn't push it
                             del(currentEvents[tag])
                             
                     else:
@@ -765,7 +782,7 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                         orphanedHits.append(packet)
 
                         # Notify.
-                        print("Orphaned HIT fragment %d, channel %d, received from %s with timestamp %d" % (packet['seq'], packet['channel_id'], *tag), file=sys.stderr)
+                        #print("Orphaned HIT fragment %d, channel %d, received from %s with timestamp %d" % (packet['seq'], packet['channel_id'], *tag), file=sys.stderr)
             except Exception as e:
                 import traceback
                 traceback.print_exc(file=sys.stderr)
@@ -779,14 +796,14 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                         print(packet, file=sys.stderr)
                         continue
                     else:
-                        print("Received an event", file=sys.stderr)
-                        print(packet, file=sys.stderr)
+                        #print("Received an event", file=sys.stderr)
+                        #print(packet, file=sys.stderr)
                         # Make a tuple tag for this packet so we can sort it
                         tag = (addr[0], packet['trigger_timestamp_l'])
 
                         if not tag in currentEvents:
 
-                            print("Registering new event from %s, timestamp %d" % tag, file=sys.stderr)
+                            # print("Registering new event %d from %s, timestamp %d" % (packet['evt_number'], *tag), file=sys.stderr)
                             
                             # Make an event from this packet
                             currentEvents[tag] = event(packet, keep_offset, activePedestal)
@@ -794,17 +811,21 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                             # Lambda function which will claim a matching orphan and signal the match success
                             claimed = lambda orphan : currentEvents[tag].claim(orphan) if (orphan['addr'], orphan['trigger_timestamp_l']) == tag else False
 
-                            print("Trying to claim orphans...", file=sys.stderr)
+                            #print("Trying to claim orphans...", file=sys.stderr)
                             # Note arcane syntax for doing an in-place mutation
                             # (I assign to the slice, instead of to the name)
                             orphanedHits[:] = [orphan for orphan in orphanedHits if not claimed(orphan)]
 
                             # Now, this event might have been completed by a bunch of orhpans
                             if currentEvents[tag].complete:
-                                print("Orphans completed an event, pushing...", file=sys.stderr)
-                                eventQueue.put(currentEvents[tag])
-
+                                #print("Orphans completed an event, pushing...", file=sys.stderr)
+                                try:
+                                    eventQueue.put(currentEvents[tag], block=False)
+                                except queue.Full as e:
+                                    print(e)
+                                    
                                 # Remove it from the list
+                                # even if we overflowed
                                 del(currentEvents[tag])
                                     
                         else:
@@ -824,9 +845,13 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
             # print(packet, file=sys.stderr)
 
         except KeyboardInterrupt:
-            print("\nCaught Ctrl+C, finishing up..", file=sys.stderr)
+            print("\nCaught Ctrl+C, closing queue...", file=sys.stderr)
+            #eventQueue.close()
+            print("At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (len(orphanedHits), len(currentEvents)), file=sys.stderr)
+            
+            # Permit death without pushing further data onto the pipe
+            eventQueue.cancel_join_thread()
             break
-
         except SystemExit:
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
             break        
