@@ -64,7 +64,9 @@ if args.i < 0:
 # If we are pedestalling, force persistent offsets
 if args.pedestal:
     args.offset = True
-    
+
+# Output the argument string we were run with
+
 #
 # STEP 1 - get control connections
 #
@@ -92,14 +94,14 @@ else:
     # XXX Magic numbers... this needs to be standardized via an
     # This is LAPPD specific stuff now.
     # Very bad design practice.
-    #                  
+                     
     readout_mode = board.peeknow(0x328)
     if args.pedestal:
 
         # Force full readout, if its not in there
         if(readout_mode < 1025):
-            print("WARNING: Board was not in full readout (ROI set to %d).  Forcing..." % readout_mode, file=sys.stderr)
-            board.pokenow(0x328, 1025)
+            print("WARNING: Board was not in full readout (ROI set to %d)." % readout_mode, file=sys.stderr)
+            #board.pokenow(0x328, 1025)
 
 
 #
