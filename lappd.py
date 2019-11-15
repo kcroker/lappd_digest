@@ -880,8 +880,7 @@ def spawn(eventQueue, args):
     intakeProcesses = [None]*args.threads
         
     for i in range(0, args.threads):
-        # VAS HAX - current firmware increments port by 256, not 1 
-        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i*256), eventQueue, args.file, args.offset, args.subtract))
+        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args.file, args.offset, args.subtract))
         intakeProcesses[i].start()
 
         # Pin the processes
