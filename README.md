@@ -36,3 +36,11 @@ This will:
 in *time order*.  So the 0th sample will correspond to the first sample read in time.
 
 Note that no control commands are issued to any boards.
+
+# To get higher speeds
+Cannot use recvmmsg() in Python, since this is a Linux specific socket API extension.
+Ugh.  I can try to write this into Python, I'm surprised no one has done this yet....
+
+tx and rx queues are not supported on all NIC hardware, so we can't depend on them either.
+
+Lets see how multiprocess handling of the data flow works...

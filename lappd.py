@@ -10,6 +10,9 @@ import math
 import pickle
 import queue
 import time
+import collections
+import multiprocessing
+import argparse
 
 # Define the format of a hit packet
 #  HIT_MAGIC (16 bits) (2 bytes)
@@ -44,6 +47,7 @@ eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width"
 globals()['EVT_MAGIC'] = 0x39ab
 
 # Hack to do things fast(er)?
+# yeah, way better
 import struct
 doit = struct.Struct(">512h")
 
@@ -52,7 +56,7 @@ doit = struct.Struct(">512h")
 #
 ########################################
 
-# Force fragmentation
+# Force fragmentation (for generation only)
 globals()['LAPPD_MTU'] = 90
 
 # Define an event class
@@ -651,9 +655,34 @@ class event(object):
             
         # Return the unpacked payload
         return tmp
+
+def export(anevent, eventQueue, dumpFile):
+
+    # For profiling of event reconstruction and
+    # queueing
+    anevent.finish = time.time()
+                                                    
+    # Recover: ~1 + ~1 + ~1 + 30 + sizeof(compiled bitstruct)= > 33+ bytes
+    del(anevent.remaining_hits, anevent.complete, anevent.chunks, anevent.raw_packet)
+    if hasattr(anevent, 'unpacker'):
+        del(anevent.unpacker)
+
+    try:
         
+        # Push it to another process?
+        if dumpFile:
+            pickle.dump(anevent, dumpFile)
+            eventQueue.put(anevent.evt_number, block=False)
+        else:
+            # There's always a queue for controlling the processes
+            anevent.prequeue = time.time()
+            eventQueue.put(anevent, block=False)
+            
+    except queue.Full as e:
+        print(e)
+    
 # Multiprocess fork() entry point
-def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
+def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=None):
 
     # If we pedestalling, load the pedestal
     activePedestal = None
@@ -665,20 +694,27 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind((socket.gethostbyname(listen_tuple[0]), listen_tuple[1]))
     
-    #
-    # Flow:
-    # 1) Event headers arrive from multiple boards
-    # 2) Hit packets flow and need to be matched to specific boards
-    # 3)
-
     # Keep track of events in progress and hits that don't belong to any events
-    currentEvents = {}
-    orphanedHits = []
+    currentEvents = collections.OrderedDict()
+    numCurrentEvents = 0
 
+    # Only keep track of at most ~2e6 orphans (~1Gig) before we start dropping
+    # deque doesn't like to be list comprehended
+    orphanedHits = [] #collections.deque(maxlen=10000)
+
+    # Open the dumpfile, if we were requested to make one
+    if dumpFile:
+        dumpFile = open("%s_%d" % (dumpFile, listen_tuple[1]), "wb")
+        
     # Release the semaphore lock
-    print("Releasing initialization lock...", file=sys.stderr)
-    eventQueue.put(Exception("Release lock"))
-    
+    print("Releasing initialization lock for port %d..." % listen_tuple[1], file=sys.stderr)
+    msg = Exception()
+    msg.port = listen_tuple[1]
+    eventQueue.put(msg)
+
+    # Now wait for everyone to be ready
+    eventQueue.join()
+
     # Server loop
     print("Entering service loop", file=sys.stderr)
     
@@ -728,53 +764,18 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                     if tag in currentEvents:
 
                         #print("Event exists for %s at %d, claiming." % tag, file=sys.stderr)
-                        
-                        # We do.  Claim this hit
-                        myevent = currentEvents[tag]
 
+                        # Don't make new references to the object
+                        # deleting those won't (??) delete the originally referenced object...
+                        
                         # Claim the hit.
-                        myevent.claim(packet)
+                        currentEvents[tag].claim(packet)
 
                         # Did we complete one?
-                        if myevent.complete:
-
-                            # For profiling of event reconstruction and
-                            # queueing
-                            myevent.finish = time.time()
-                            
-                            # OOO
-                            # Push the payload completed event onto the queue
-                            # Probably don't want or need to ship the object
-                            # A dictionary of data sufficient for the aggregator level
-                            # should be fine
-                            #print("Shipping completed event...\n\n", file=sys.stderr)
-
-                            # Strip unnecessary things from the event
-                            # and channels.
-                            
-                            # Recover: ~1 + ~1 + ~1 + 30 + sizeof(compiled bitstruct)= > 33+ bytes
-                            del(myevent.remaining_hits, myevent.complete, myevent.chunks, myevent.raw_packet)
-                            if hasattr(myevent, 'unpacker'):
-                                del(myevent.unpacker)
-
-                            # Recover: 0.5 + 2 + 2 + 4 + 1 + 16 (at most) = 24.5 -> ~25 bytes/channel
-                            #for channel in myevent.channels:
-                            #    del(channel['addr'], channel['seq'], channel['magic'], channel['hit_payload_size'], channel['trigger_timestamp_l'], channel['resolution'])
-
-                            #    # If it was orphaned, we added an address to it
-                            #    if 'addr' in channel:
-                            #        del(channel['addr'])
-
-                            # Push it to the other process
-                            try:
-                                myevent.prequeue = time.time()
-                                eventQueue.put(myevent, block=False)
-                            except queue.Full as e:
-                                print(e)
-
-                            # Remove this from the list of current events
-                            # even if we couldn't push it
+                        if currentEvents[tag].complete:
+                            export(currentEvents[tag], eventQueue, dumpFile)
                             del(currentEvents[tag])
+                            numCurrentEvents -= 1
                             
                     else:
                         # We don't belong to anyone?
@@ -808,26 +809,33 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
                             # Make an event from this packet
                             currentEvents[tag] = event(packet, keep_offset, activePedestal)
 
+                            # And remove old ones if we are overflowing
+                            numCurrentEvents += 1
+                            if numCurrentEvents > 100:
+                                old = currentEvents.popitem(last=False)
+
+                                # It would be better to dump this event, even if its incomplete...
+                                
+                                # This should delete all references to the hitstash inside the object
+                                del(old)
+
                             # Lambda function which will claim a matching orphan and signal the match success
                             claimed = lambda orphan : currentEvents[tag].claim(orphan) if (orphan['addr'], orphan['trigger_timestamp_l']) == tag else False
-
                             #print("Trying to claim orphans...", file=sys.stderr)
                             # Note arcane syntax for doing an in-place mutation
                             # (I assign to the slice, instead of to the name)
+                            #
                             orphanedHits[:] = [orphan for orphan in orphanedHits if not claimed(orphan)]
-
+                                                        
                             # Now, this event might have been completed by a bunch of orhpans
                             if currentEvents[tag].complete:
                                 #print("Orphans completed an event, pushing...", file=sys.stderr)
-                                try:
-                                    eventQueue.put(currentEvents[tag], block=False)
-                                except queue.Full as e:
-                                    print(e)
-                                    
+                                export(currentEvents[tag], eventQueue, dumpFile)
+
                                 # Remove it from the list
-                                # even if we overflowed
                                 del(currentEvents[tag])
-                                    
+                                numCurrentEvents -= 1
+                                
                         else:
                             print("Received a duplicate event (well, sequence numbers might have been different but source and low timestamp collided)")
                             
@@ -845,8 +853,13 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
             # print(packet, file=sys.stderr)
 
         except KeyboardInterrupt:
-            print("\nCaught Ctrl+C, closing queue...", file=sys.stderr)
-            #eventQueue.close()
+            print("\nCaught SIGINT.", file=sys.stderr)
+
+            # If there was a dumpFile, close it
+            if dumpFile:
+                print("\nClosing dump..", file=sys.stderr)
+                dumpFile.close()
+            
             print("At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (len(orphanedHits), len(currentEvents)), file=sys.stderr)
             
             # Permit death without pushing further data onto the pipe
@@ -856,4 +869,92 @@ def intake(listen_tuple, eventQueue, keep_offset=False, subtract=None):
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
             break        
 
+#
+# This will spawn a bunch of listener processes
+# and return when they are ready
+#
+def spawn(eventQueue, args):
+
+    import os
+    
+    intakeProcesses = [None]*args.threads
         
+    for i in range(0, args.threads):
+        # VAS HAX - current firmware increments port by 256, not 1 
+        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i*256), eventQueue, args.file, args.offset, args.subtract))
+        intakeProcesses[i].start()
+
+        # Pin the processes
+        # Ha!  This was a total failure for the IPC stuff
+        #os.system("taskset -p -c %d %d" % (i, intakeProcesses[i].pid)) 
+
+    # Now, pin ourselves to the remaining CPU!
+    #os.system("taskset -p -c %d %d" % (args.threads, os.getpid()))
+
+    # Wait for the intake processes to flag that they are ready
+    for i in range(0, args.threads):
+    
+        # The reconstructor will push an Exception object on the queue when the socket is open
+        # and ready to receive data.  Use the existing queue, so we don't need to make a new lock
+        msg = eventQueue.get()
+
+        if not isinstance(msg, Exception):
+            raise Exception("Semaphore event did not indicate permission to proceed. Badly broken.")
+
+        print("Acknowledged ready to intake on %d" % msg.port, file=sys.stderr)
+        eventQueue.task_done()
+
+    print("Lock passed, all intake processes ready...", file=sys.stderr)
+
+    # Return the processes
+    return intakeProcesses
+
+#
+# Utility function to dump a pedestal subtracted event
+#
+def dump(event):
+    # # Dump the entire detection in ASCII
+    print("# event number = %d\n# y_max = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1))
+    for channel, amplitudes in event.channels.items():
+        print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
+        for t, ampl in enumerate(amplitudes):
+            print("%d %d %d" % (t, ampl, channel))
+        print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
+        
+    # End this detection (because \n, this will have an additional newline)
+    print("# END OF EVENT %d\n" % event.evt_number)
+
+# If doing hardware triggers, the event queue is probably
+# loaded with events
+# Send the death signal to the child and wait for it
+def reap(intakeProcesses):
+    print("Sending interrupt signal to intake process (get out of recvfrom())...", file=sys.stderr)
+    from os import kill
+    from signal import SIGINT
+    
+    for proc in intakeProcesses:
+        kill(proc.pid, SIGINT)
+        proc.join()
+
+#
+# Common parameters that are used by anything intaking packets
+#
+def commonArguments(leader):
+    
+    parser = argparse.ArgumentParser(description=leader)
+    
+    parser.add_argument('board', metavar='IP_ADDRESS', type=str, help='IP address of the target board')
+    parser.add_argument('N', metavar='NUM_SAMPLES', type=int, help='The number of samples to request')
+    parser.add_argument('-i', metavar='INTERVAL', type=float, default=0.01, help='The interval (seconds) between software triggers')
+
+    parser.add_argument('-t', '--threads', metavar="NUM_THREADS", type=int, help="Number of children to attach to distinct ports (to receive data in parallel on separate UDP buffers at the POSIX level.  Number of processors - 1 is a good choice.", default=1)
+
+    parser.add_argument('-I', '--initialize', action="store_true", help="Initialize the board before taking data")
+    parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events.  (Order by capacitor, instead of ordering by time)')
+
+    parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
+    parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
+    parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
+    parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
+        
+    return parser
