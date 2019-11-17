@@ -11,8 +11,6 @@ import pickle
 import queue
 import time
 import collections
-import multiprocessing
-import argparse
 
 # Define the format of a hit packet
 #  HIT_MAGIC (16 bits) (2 bytes)
@@ -128,7 +126,7 @@ class event(object):
         def __init__(self, samples):
 
             # Now compute the pedestals
-            from scipy import stats
+            from statistics import pvariance
 
             # Did we receive any samples?
             if not len(samples):
@@ -136,9 +134,6 @@ class event(object):
         
             # Some board information
             self.board_id = samples[0].board_id
-
-            # Event sample from which the pedestal is constructed
-            self.samples = samples
 
             # Use the first event to determine the list of channels
             self.chan_list = samples[0].channels.keys()
@@ -155,25 +150,33 @@ class event(object):
                     raise Exception("Refusing to build pedestals with torn data (ROI mode)")
             
             # Set up for pedestals
-            self.nobs = {}
-            self.minmax = {}
             self.mean = {}
             self.variance = {}
-            self.skewness = {}
-            self.kurtosis = {}
 
-            
-            # Compute the pedestal
+            # Gotta do it manually
             for chan_id in self.chan_list:
-                amplitude_lists = []
-                for anevent in self.samples:
-                    amplitude_lists.append(anevent.channels[chan_id])
+                caps = [ [] for x in range(0, len(samples[0].channels[chan_id])) ]
+                self.mean[chan_id] = []
+                self.variance[chan_id] = []
+                
+                for evt in samples:
+                    for capacitor, ampl in enumerate(evt.channels[chan_id]):
+                        if not ampl is None:
+                            caps[capacitor].append(ampl)
 
-                # Now compute the pedestals
-                self.nobs[chan_id], self.minmax[chan_id], self.mean[chan_id], self.variance[chan_id], self.skewness[chan_id], self.kurtosis[chan_id] = stats.describe(amplitude_lists)
-
+                # Now we have it in filtered capacitor form
+                for cap in caps:
+                    # Cap is a list
+                    N = len(cap)
+                    if N == 0:
+                        self.mean[chan_id].append(None)
+                        self.variance[chan_id].append(None)
+                    else:
+                        avg = sum(cap)/N
+                        self.mean[chan_id].append(avg)
+                        self.variance[chan_id].append(pvariance(cap, mu=avg))
+                    
             # Remove the samples because python can't pickle it
-            del(self.samples)
             del(self.chan_list)
 
         #
@@ -528,88 +531,15 @@ class event(object):
         current_hit = self.channels[packet['channel_id']]
         
         # Did we complete a hit reconstruction with this packet?
-        if current_hit.completed(): 
-
+        if current_hit.completed():
             # Remove these bytes from the total expected over all channels
             self.remaining_bytes -= current_hit.receivedBytes
             
             #print("All expected hit bytes received on channel %d.  Unpacking..." % packet['channel_id'], file=sys.stderr)
 
-            # Notice that we sort the dictionary by sequence numbers!
-            subhits = [(offnpay[0], self.unpack(offnpay[1])) for seq, offnpay in sorted(current_hit.payloads.items(), key=lambda x:x[0])]
-
-            # Since this is sorted, the offset of the lowest sequence number is (hopefully)
-            # the true offset.  This will be wrong if the first packet is dropped...
-            #
-            # (With the sequence numbers being fully incremental, you'll be able to
-            #  reconstruct capacitor positions, but not have any time reference.)
-            #print("Setting the overall offset for channel %d to %d" % (packet['channel_id'], subhits[0][0]), file=sys.stderr)
-            self.offsets[packet['channel_id']] = subhits[0][0]
-            
-            # Allocate space for the entire dero
-            # Note that -1 signifies no data received, either due to packet drop or that the
-            # device didn't report it
-            amplitudes = [-10] * current_hit.max_samples
-            
-            # Assign by slicing directly into the amplitudes
-            # OOO we can write torn offsets directly here
-            for offset, ampls in subhits:
-
-                # DDD
-                # print(ampls, file=sys.stderr)
-
-                #print("\tWriting at offset %d" % offset, ampls, file=sys.stderr)
-                # Don't know how much optimiation python does with minimizing the number of
-                # lookups on len, which is O(N)...
-                len_ampls = len(ampls)
-                end = offset + len_ampls
-
-                # Slice it in, if we don't overrun
-                if end < current_hit.max_samples:
-                    amplitudes[offset:end] = ampls
-                else:
-                    # Slice in what we can at the end...
-                    # XXX off by 1?
-                    overrun = end - current_hit.max_samples
-                    fit = current_hit.max_samples - offset
-                    amplitudes[offset:current_hit.max_samples] = ampls[:fit]
-
-                    # ... and slice the rest in at the front
-                    amplitudes[:overrun] = ampls[fit:]
-
-            # All subhits are now in place.
-
-            # Are we pedestalling?  Do it now before we adjust the zero offset
-            if self.activePedestal:
-                #print("Subtracting pedestals from data before taring...", file=sys.stderr)
-                amplitudes = self.activePedestal.subtract(amplitudes, packet['channel_id'])
-                
-            # Are we trying to zero offset?
-            if not self.keep_offset:
-
-                # This is the first sampled capacitor position, in time
-                tare = subhits[0][0]
-                #print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
-                
-                # Never do a modulo in a loop computation, god
-                # Since we are not memory limited in 2019, just do an offset copy
-                tmp = [0]*(current_hit.max_samples)
-
-                # Minimize computations
-                delta = current_hit.max_samples - tare
-
-                # Do the head of the final list...
-                tmp[:delta] = amplitudes[tare:current_hit.max_samples]
-
-                # ... and the tail
-                tmp[delta:] = amplitudes[0:tare]
-
-                # Replace amplitudes
-                amplitudes = tmp
-                
             # Overwrite the reference to this hitstash object with the final amplitudes list
             # This should eventually garbage collect the hitstash object...
-            self.channels[packet['channel_id']] = amplitudes
+            self.channels[packet['channel_id']] = self.translate(current_hit, packet['channel_id'])
 
             # Track that we finished one of the expected hits
             self.remaining_hits -= 1
@@ -623,6 +553,104 @@ class event(object):
 
         # Always return true (used for orphans)
         return True
+
+    #
+    # This converts a channel (as a hitstash object) into a Python integer list 
+    # 
+    def translate(self, current_hit, channel):
+                    
+        # Notice that we sort the dictionary by sequence numbers!
+        subhits = [(offnpay[0], self.unpack(offnpay[1])) for seq, offnpay in sorted(current_hit.payloads.items(), key=lambda x:x[0])]
+
+        # Since this is sorted, the offset of the lowest sequence number is (hopefully)
+        # the true offset.  This will be wrong if the first packet is dropped...
+        #
+        # (With the sequence numbers being fully incremental, you'll be able to
+        #  reconstruct capacitor positions, but not have any time reference.)
+        #print("Setting the overall offset for channel %d to %d" % (packet['channel_id'], subhits[0][0]), file=sys.stderr)
+        self.offsets[channel] = subhits[0][0]
+
+        # Allocate space for the entire dero
+        # Store None's 
+        amplitudes = [None] * current_hit.max_samples
+        
+        # Assign by slicing directly into the amplitudes
+        # OOO we can write torn offsets directly here
+        for offset, ampls in subhits:
+            
+            # DDD
+            # print(ampls, file=sys.stderr)
+            
+            #print("\tWriting at offset %d" % offset, ampls, file=sys.stderr)
+            # Don't know how much optimiation python does with minimizing the number of
+            # lookups on len, which is O(N)...
+            len_ampls = len(ampls)
+            end = offset + len_ampls
+
+            # Slice it in, if we don't overrun
+            if end < current_hit.max_samples:
+                amplitudes[offset:end] = ampls
+            else:
+                # Slice in what we can at the end...
+                # XXX off by 1?
+                overrun = end - current_hit.max_samples
+                fit = current_hit.max_samples - offset
+                amplitudes[offset:current_hit.max_samples] = ampls[:fit]
+
+                # ... and slice the rest in at the front
+                amplitudes[:overrun] = ampls[fit:]
+
+        # All subhits are now in place in a mutable list.
+                
+        # Are we pedestalling?  Do it now before we adjust the zero offset
+        if self.activePedestal:
+            #print("Subtracting pedestals from data before taring...", file=sys.stderr)
+            amplitudes = self.activePedestal.subtract(amplitudes, channel)
+
+        # Mask out the naughty ones to the left of stop.
+        # This is because stop is t_max, and things get munged
+        # during the stop process
+        p = subhits[0][0]
+        masklen = 5
+        for i in range(0, masklen):
+
+            # Right mask
+            amplitudes[p + i] = None
+
+            if p + (i + 1) == current_hit.max_samples:
+                p = -(i + 1)
+            
+            # Left mask?
+            # amplitudes[p - i] = None
+
+            # if p - (i + 1) < 0:
+            #     p = current_hit.max_samples + i
+         
+        # Are we trying to zero offset?
+        if not self.keep_offset:
+
+            # This is the first sampled capacitor position, in time
+            tare = subhits[0][0]
+            #print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
+                
+            # Never do a modulo in a loop computation, god
+            # Since we are not memory limited in 2019, just do an offset copy
+            tmp = [0]*(current_hit.max_samples)
+
+            # Minimize computations
+            delta = current_hit.max_samples - tare
+
+            # Do the head of the final list...
+            tmp[:delta] = amplitudes[tare:current_hit.max_samples]
+
+            # ... and the tail
+            tmp[delta:] = amplitudes[0:tare]
+
+            # Replace amplitudes
+            amplitudes = tmp
+
+        return amplitudes
+
         
     #
     # Return an int array based on the provided payload.
@@ -867,47 +895,8 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
             break
         except SystemExit:
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
-            break        
-
-#
-# This will spawn a bunch of listener processes
-# and return when they are ready
-#
-def spawn(eventQueue, args):
-
-    import os
-    
-    intakeProcesses = [None]*args.threads
+            break
         
-    for i in range(0, args.threads):
-        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args.file, args.offset, args.subtract))
-        intakeProcesses[i].start()
-
-        # Pin the processes
-        # Ha!  This was a total failure for the IPC stuff
-        #os.system("taskset -p -c %d %d" % (i, intakeProcesses[i].pid)) 
-
-    # Now, pin ourselves to the remaining CPU!
-    #os.system("taskset -p -c %d %d" % (args.threads, os.getpid()))
-
-    # Wait for the intake processes to flag that they are ready
-    for i in range(0, args.threads):
-    
-        # The reconstructor will push an Exception object on the queue when the socket is open
-        # and ready to receive data.  Use the existing queue, so we don't need to make a new lock
-        msg = eventQueue.get()
-
-        if not isinstance(msg, Exception):
-            raise Exception("Semaphore event did not indicate permission to proceed. Badly broken.")
-
-        print("Acknowledged ready to intake on %d" % msg.port, file=sys.stderr)
-        eventQueue.task_done()
-
-    print("Lock passed, all intake processes ready...", file=sys.stderr)
-
-    # Return the processes
-    return intakeProcesses
-
 #
 # Utility function to dump a pedestal subtracted event
 #
@@ -917,43 +906,8 @@ def dump(event):
     for channel, amplitudes in event.channels.items():
         print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
         for t, ampl in enumerate(amplitudes):
-            print("%d %d %d" % (t, ampl, channel))
+            print("%d %s %d" % (t, repr(ampl), channel))
         print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
         
     # End this detection (because \n, this will have an additional newline)
     print("# END OF EVENT %d\n" % event.evt_number)
-
-# If doing hardware triggers, the event queue is probably
-# loaded with events
-# Send the death signal to the child and wait for it
-def reap(intakeProcesses):
-    print("Sending interrupt signal to intake process (get out of recvfrom())...", file=sys.stderr)
-    from os import kill
-    from signal import SIGINT
-    
-    for proc in intakeProcesses:
-        kill(proc.pid, SIGINT)
-        proc.join()
-
-#
-# Common parameters that are used by anything intaking packets
-#
-def commonArguments(leader):
-    
-    parser = argparse.ArgumentParser(description=leader)
-    
-    parser.add_argument('board', metavar='IP_ADDRESS', type=str, help='IP address of the target board')
-    parser.add_argument('N', metavar='NUM_SAMPLES', type=int, help='The number of samples to request')
-    parser.add_argument('-i', metavar='INTERVAL', type=float, default=0.01, help='The interval (seconds) between software triggers')
-
-    parser.add_argument('-t', '--threads', metavar="NUM_THREADS", type=int, help="Number of children to attach to distinct ports (to receive data in parallel on separate UDP buffers at the POSIX level.  Number of processors - 1 is a good choice.", default=1)
-
-    parser.add_argument('-I', '--initialize', action="store_true", help="Initialize the board before taking data")
-    parser.add_argument('-o', '--offset', action="store_true", help='Retain ROI channel offsets for incoming events.  (Order by capacitor, instead of ordering by time)')
-
-    parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
-    parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
-    parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
-    parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
-        
-    return parser

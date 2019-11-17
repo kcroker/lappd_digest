@@ -7,28 +7,25 @@ import os
 sys.path.append("./eevee")
 os.environ['EEVEE_SRC_PATH'] = "./eevee"
 
-import eevee
-import lappd
-import multiprocessing
+import lappdProtocol
+import lappdIfc
+import lappdTool
+
 import pickle
 import queue
-import argparse
 import socket
 import time
     
-#
-# STEP 0 - parse command line arguments
-#
-##################################
-# Common arguments
-parser = lappd.commonArguments('Get calibration data from Eevee boards speaking protocol MK01.')
+# Make a new tool
+parser = lappdTool.create('Get calibration data from Eevee boards speaking protocol MK01.')
 
 # Custom args
 parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
-parser.add_argument('-l', '--listen', action="store_true", help='Passively listen at IP_ADDRESS for incoming data.  Interval and samples are ignored.')
-parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before listening for events')
+parser.add_argument('-q', '--quiet', action="store_true", help='Do not dump anything to stdout.')
+#parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before listening for events')
 
-args = parser.parse_args()
+# Connect it up
+ifc, args, eventQueue = lappdTool.connect(parser)
 
 # Simple sanity check
 if not args.N > 0:
@@ -51,75 +48,35 @@ if args.file:
     import datetime
     args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
 
-#
-# STEP 1 - get control connections
-#
-#######################################
-
-if args.listen:
-    args.listen = '0.0.0.0'
-else:
-    # Open up a control connection
-    # Don't try to query the board for its DNA yet
-    board = eevee.board(args.board, anonymous=True)
-
-    # Aim the board at ourself
-    #  This sets the outgoing data path port on the board to port
-    #  And sets the destination for data path packets to port
-    # board.aimNBIC()
-    
-    # Convenience shortcut
-    args.listen = board.s.getsockname()[0]
-
-#
-# STEP 2 - fork an event reconstructor
-#
-########################################
-
-# Used for signaling and passing events, if not dumping them to files
-eventQueue = multiprocessing.JoinableQueue()
-
-#
-# Spawn a bunch of reconstruction listener processes
-# (see lappd.py for the arguments that its looking for)
-#
-# NOTE: if args.file = None (default), event objects will
-# come in on the queue.  Otherwise, event numbers (receipts)
-# will come in on the queue.
-#
 # The __name__ check is mandatory
 if __name__ == '__main__':
-    intakeProcesses = lappd.spawn(eventQueue, args)
+    intakeProcesses = lappdTool.spawn(args, eventQueue)
 
-#
-# STEP 4 - pedestal the board
-#
-######################################
 
-# Are we just listening?
-if args.listen == '0.0.0.0':
-    while args.N > 0:
-        try:
-            # Grab an event
-            event = eventQueue.get()
+# # Are we just listening?
+# if args.listen == '0.0.0.0':
+#     while args.N > 0:
+#         try:
+#             # Grab an event
+#             event = eventQueue.get()
 
-            # Output it
-            print("Event %d:\n\tReconstruction time: %e seconds\n\tQueue delay: %e seconds" % (event.evt_number, event.finish - event.start, time.time() - event.prequeue), file=sys.stderr)
+#             # Output it
+#             print("Event %d:\n\tReconstruction time: %e seconds\n\tQueue delay: %e seconds" % (event.evt_number, event.finish - event.start, time.time() - event.prequeue), file=sys.stderr)
 
-            #if not args.quiet:
-            lappd.dump(event)
+#             #if not args.quiet:
+#             lappd.dump(event)
                 
-            args.N -= 1
+#             args.N -= 1
 
-            # Explicitly free the memory
-            eventQueue.task_done()
-            del(event)
+#             # Explicitly free the memory
+#             eventQueue.task_done()
+#             del(event)
             
-        except Exception as e:
-            import traceback
-            traceback.print_exc(file=sys.stderr)
+#         except Exception as e:
+#             import traceback
+#             traceback.print_exc(file=sys.stderr)
 
-# So we are not just listening, lets do something
+# # So we are not just listening, lets do something
 
 events = []
 import time
@@ -128,7 +85,7 @@ for i in range(0, args.N):
     # --- Note that these are magic numbers...
     if not args.external:
         # Suppress board readback and response!
-        board.pokenow(0x320, (1 << 6), readback=False, silent=True) #, silent=True, readback=False)
+        ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True) #, silent=True, readback=False)
     
         # Sleep for the specified delay
         time.sleep(args.i)
@@ -144,8 +101,9 @@ for i in range(0, args.N):
             # Push it onto the processing queue
             events.append(event)
 
-            # Output the ascii dump
-            lappd.dump(event)
+            if not args.quiet:
+                # Output the ascii dump
+                lappdProtocol.dump(event)
 
         # Signal that we consumed something
         eventQueue.task_done()
@@ -164,4 +122,4 @@ if args.pedestal:
         pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
 
 # We're finished, so clean up the listeners
-lappd.reap(intakeProcesses)
+lappdTool.reap(intakeProcesses)
