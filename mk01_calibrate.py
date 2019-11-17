@@ -22,7 +22,7 @@ parser = lappdTool.create('Get calibration data from Eevee boards speaking proto
 # Custom args
 parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
 parser.add_argument('-q', '--quiet', action="store_true", help='Do not dump anything to stdout.')
-#parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before listening for events')
+parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before intaking any events')
 
 # Connect it up
 ifc, args, eventQueue = lappdTool.connect(parser)
@@ -47,6 +47,38 @@ if args.external:
 if args.file:
     import datetime
     args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
+
+# Record a bunch of registers first
+# (Abhorrent magic numbers...)
+
+regs = [0x1020 + i*4 for i in range(0,5)] + [lappdIfc.DRSREFCLKRATIO, 0x620, lappdIfc.ADCBUFNUMWORDS] + ([int(reg[0], 0) for reg in args.registers] if args.registers else [])
+
+print("# Standard and custom registers at run start:")
+for reg in regs:
+    print("# %s = %s" % (hex(reg), hex(ifc.brd.peeknow(reg))))
+#
+# XXX Blocked queries broken in Mark I *hardware* 
+# (rapid register accesses for external devices not safe)
+#
+# # Queue these registers
+# ifc.brd.peek(regs)
+
+# # Queue any additionally requested registers
+# if args.registers:
+#     ifc.brd.peek(args.registers)
+
+# # Query all registers at once
+# responses = ifc.brd.transact()
+
+# # Write them out
+# print("# System register values before run: ")
+# for reg,val in responses[0].payload.items():
+#     print("# %s: %s" % (hex(reg), hex(val)))  
+
+# if args.registers:
+#     print("# Additional register values before run: ")
+#     for reg,val in responses[1].payload.items():
+#         print("# %s: %s" % (hex(reg), hex(val)))  
 
 # The __name__ check is mandatory
 if __name__ == '__main__':
@@ -85,7 +117,7 @@ for i in range(0, args.N):
     # --- Note that these are magic numbers...
     if not args.external:
         # Suppress board readback and response!
-        ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True) #, silent=True, readback=False)
+        ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
     
         # Sleep for the specified delay
         time.sleep(args.i)
