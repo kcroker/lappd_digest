@@ -126,7 +126,7 @@ class event(object):
         def __init__(self, samples):
 
             # Now compute the pedestals
-            from statistics import pvariance
+            from statistics import variance
 
             # Did we receive any samples?
             if not len(samples):
@@ -174,7 +174,7 @@ class event(object):
                     else:
                         avg = sum(cap)/N
                         self.mean[chan_id].append(avg)
-                        self.variance[chan_id].append(pvariance(cap, mu=avg))
+                        self.variance[chan_id].append(variance(cap, xbar=avg))
                     
             # Remove the samples because python can't pickle it
             del(self.chan_list)
@@ -185,8 +185,16 @@ class event(object):
         def subtract(self, amplitudes, chan_id):
             if not chan_id in self.mean:
                 raise Exception("Given pedestal does not define channel %d" % chan_id)
-            
-            return [ (amplitudes[i] - self.mean[chan_id][i]) for i in range(0, len(self.mean[chan_id]))]
+
+            # OOO This looks slow as balls
+            adjusted = []
+            for i in range(0, len(self.mean[chan_id])):
+                if not self.mean[chan_id][i] is None and not amplitudes[i] is None:
+                    adjusted.append(amplitudes[i] - self.mean[chan_id][i])
+                else:
+                    adjusted.append(None)
+                    
+            return adjusted
             
         #
         # Generate a test pedestal, with normally distributed event samples
@@ -620,9 +628,9 @@ class event(object):
             if p + (i + 1) == current_hit.max_samples:
                 p = -(i + 1)
             
-            # Left mask?
+            # # Left mask?
             # amplitudes[p - i] = None
-
+            
             # if p - (i + 1) < 0:
             #     p = current_hit.max_samples + i
          

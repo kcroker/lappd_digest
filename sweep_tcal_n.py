@@ -56,7 +56,7 @@ ifc.DacSetVout(DAC_CMOFS, CMOFS)
 ifc.DacSetVout(DAC_ROFS, ROFS)
 
 # Tell the user what we are dusering
-print("# CMOFS: %f\n# TCAL_start: %f\n# TCAL_stop: %f\n# ROFS: %f" % (CMOFS, TCAL_start, TCAL_start, ROFS))
+print("# CMOFS: %f\n# TCAL_start: %f\n# TCAL_stop: %f\n# ROFS: %f" % (CMOFS, TCAL_start, TCAL_stop, ROFS))
 
 # Define an event list
 evts = []

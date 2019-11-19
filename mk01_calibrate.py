@@ -51,11 +51,45 @@ if args.file:
 # Record a bunch of registers first
 # (Abhorrent magic numbers...)
 
-regs = [0x1020 + i*4 for i in range(0,5)] + [lappdIfc.DRSREFCLKRATIO, 0x620, lappdIfc.ADCBUFNUMWORDS] + ([int(reg[0], 0) for reg in args.registers] if args.registers else [])
+# Take the voltages we care about.
+#
+# From Vasily's snippet
+#           dacCode = int(0xffff/2.5*VOut)
+# So inverting it:
+#   VOut = 0xfff/(2.5*dacCode)
+#
+human_readable = {
+    0 : 'bias',
+    1 : 'rofs',
+    2 : 'oofs',
+    3 : 'cmofs',
+    4 : 'tcal_n1',
+    5 : 'tcal_n2'
+}
 
 print("# Standard and custom registers at run start:")
-for reg in regs:
-    print("# %s = %s" % (hex(reg), hex(ifc.brd.peeknow(reg))))
+for i in range(0,6):
+    reg = 0x1020 + i*4
+
+    # DAC levels are shadowed.
+    # So I have to read twice.
+    ifc.brd.peeknow(reg)
+    val = ifc.brd.peeknow(reg)
+    print("#\t%s (%s) = %.02fV" % (human_readable[i], hex(reg), (2.5*val/0xffff)))
+    
+human_readable = {
+    lappdIfc.DRSREFCLKRATIO : 'DRSREFCLKRATIO',
+    lappdIfc.ADCBUFNUMWORDS : 'ADCBUFNUMWORDS',
+    0x620 : '36 + 4*(selected oversample)'
+}
+
+for reg in [lappdIfc.DRSREFCLKRATIO, 0x620, lappdIfc.ADCBUFNUMWORDS]:
+    val = ifc.brd.peeknow(reg)
+    print("#\t%s (%s) = %d" % (human_readable[reg], hex(reg), val))
+
+# Make it pretty
+print("#")
+
 #
 # XXX Blocked queries broken in Mark I *hardware* 
 # (rapid register accesses for external devices not safe)
