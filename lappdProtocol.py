@@ -127,7 +127,8 @@ class event(object):
 
             # Now compute the pedestals
             from statistics import variance
-
+            from statistics import mean
+            
             # Did we receive any samples?
             if not len(samples):
                 raise Exception("Did not receive any samples!")
@@ -171,8 +172,11 @@ class event(object):
                     if N == 0:
                         self.mean[chan_id].append(None)
                         self.variance[chan_id].append(None)
+                    elif N == 1:
+                        self.mean[chan_id].append(cap)
+                        self.variance[chan_id].append(None)
                     else:
-                        avg = sum(cap)/N
+                        avg = mean(cap)
                         self.mean[chan_id].append(avg)
                         self.variance[chan_id].append(variance(cap, xbar=avg))
                     
