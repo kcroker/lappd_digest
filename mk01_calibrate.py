@@ -43,11 +43,6 @@ if args.pedestal:
 if args.external:
     args.i = 0
     
-# Make a good (useful?) filename
-if args.file:
-    import datetime
-    args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
-
 # Record a bunch of registers first
 # (Abhorrent magic numbers...)
 

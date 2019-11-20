@@ -72,7 +72,7 @@ for voltage in np.linspace(TCAL_start, TCAL_stop, args.N):
     time.sleep(args.i)
 
     # Software trigger
-    ifc.brd.pokenow(0x320, 1 << 6)
+    ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
 
     # Wait for the event
     evt = eventQueue.get()

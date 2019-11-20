@@ -53,7 +53,12 @@ def connect(parser):
 
     # Make an event queue
     eventQueue = multiprocessing.JoinableQueue()
-       
+
+    # Make a good (useful?) filename
+    if args.file:
+        import datetime
+        args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
+
     # Return a tuble with the interface and the arguments
     return (ifc, args, eventQueue)
 

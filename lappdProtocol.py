@@ -631,12 +631,15 @@ class event(object):
 
             if p + (i + 1) == current_hit.max_samples:
                 p = -(i + 1)
+
+        p = subhits[0][0]
+        for i in range(0, masklen):
+
+            # Left mask?
+            amplitudes[p - i] = None
             
-            # # Left mask?
-            # amplitudes[p - i] = None
-            
-            # if p - (i + 1) < 0:
-            #     p = current_hit.max_samples + i
+            if p - (i + 1) < 0:
+                p = current_hit.max_samples + i
          
         # Are we trying to zero offset?
         if not self.keep_offset:
@@ -915,10 +918,14 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
 def dump(event):
     # # Dump the entire detection in ASCII
     print("# event number = %d\n# y_max = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1))
+
+    # A quick formatter
+    fmt = lambda x : float('nan') if x is None else x
+    
     for channel, amplitudes in event.channels.items():
         print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
         for t, ampl in enumerate(amplitudes):
-            print("%d %s %d" % (t, repr(ampl), channel))
+            print("%d %e %d" % (t, fmt(ampl), channel))
         print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
         
     # End this detection (because \n, this will have an additional newline)
