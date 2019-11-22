@@ -172,6 +172,9 @@ for i in range(0, args.N):
     except queue.Empty:
         print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
 
+# We're finished, so clean up the listeners
+lappdTool.reap(intakeProcesses)
+
 # Should we build a pedestal with these events?
 if args.pedestal:
 
@@ -181,6 +184,3 @@ if args.pedestal:
     # Write it out
     if len(events) > 0:
         pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
-
-# We're finished, so clean up the listeners
-lappdTool.reap(intakeProcesses)

@@ -13,6 +13,10 @@ import lappdTool           # UX shortcuts: mixed board and protocol stuff
 # subsystem.  All tools will share the same baseline syntax and semantics.
 parser = lappdTool.create("Make volatage response curves for the A21")
 
+# Add some specific options for this tool
+# These default values calibrate pretty well
+parser.add_argument('sweep', metavar='SWEEP', type=float, default=2.5, help='Sweep TCAL until this voltage.')
+
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
 
@@ -23,50 +27,18 @@ if __name__ == "__main__":
 
 ############## COMMON TOOL INITIALIZATION END ##############
 
-# DAC Channel mappings (in A21 crosshacked)
-# (these should be moved to lappdIfc.py)
-DAC_BIAS = 0
-DAC_ROFS = 1
-DAC_OOFS = 2
-DAC_CMOFS = 3
-DAC_TCAL_N1 = 4
-DAC_TCAL_N2 = 5
-# Other channels are not connected.
-
-# At these values, unbuffered TCAL does not
-# have the periodic pulse artifact (@ CMOFS 0.8)
-#  TCAL_N   0.64 -> 0.73
-#
-# Note that in A21, CMOFS is tied to OOFS, so you can't change that one without
-# undoing the effect on the other side of teh DRS4s
-#
-# DAC probably cares about OOFS being in a good spot... is it?
-
-TCAL_start = 0.1 #0.0
-TCAL_stop = 1.5 #2.5
-
-# As per DRS4 spec, 1.55V gives symmetric
-# differential inputs of -0.5V to 0.5V.
-ROFS = 1.55
-
-# Set the non-swept values
-# For both sides of the DRS rows
-CMOFS = 0.8
-ifc.DacSetVout(DAC_CMOFS, CMOFS)
-ifc.DacSetVout(DAC_ROFS, ROFS)
-
 # Tell the user what we are dusering
-print("# CMOFS: %f\n# TCAL_start: %f\n# TCAL_stop: %f\n# ROFS: %f" % (CMOFS, TCAL_start, TCAL_stop, ROFS))
+print("# CMOFS: %f\n# TCAL_start: %f\n# TCAL_stop: %f\n# ROFS: %f" % (args.cmofs, args.tcal, args.sweep, args.rofs))
 
 # Define an event list
 evts = []
 
 # Set the number of samples in each sweep
-for voltage in np.linspace(TCAL_start, TCAL_stop, args.N):
+for voltage in np.linspace(args.tcal, args.sweep, args.N):
 
     # Set the values
-    ifc.DacSetVout(DAC_TCAL_N1, voltage)
-    ifc.DacSetVout(DAC_TCAL_N2, voltage)
+    ifc.DacSetVout(lappdTool.DAC_TCAL_N1, voltage)
+    ifc.DacSetVout(lappdTool.DAC_TCAL_N2, voltage)
 
     # Wait for it to settle
     time.sleep(args.i)
@@ -134,7 +106,11 @@ else:
     
         for evt in evts:
             # Save this data point (filtering out Nones)
-            curves[chan].append( (evt.voltage, statistics.mean(filter(None, evt.channels[chan]))) )
+            filtered = list(filter(None, evt.channels[chan]))
+            if not len(filtered):
+                curves[chan].append( (evt.voltage, float('nan')))
+            else:
+                curves[chan].append( (evt.voltage, statistics.mean(filtered)))
 
     # Now output the results
     for channel, results in curves.items():

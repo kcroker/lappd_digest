@@ -633,6 +633,7 @@ class event(object):
                 p = -(i + 1)
 
         p = subhits[0][0]
+        masklen = 100
         for i in range(0, masklen):
 
             # Left mask?

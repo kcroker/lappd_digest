@@ -29,8 +29,35 @@ def create(leader):
     parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
     parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
     parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
-        
+
+    # At these values, unbuffered TCAL does not
+    # have the periodic pulse artifact (@ CMOFS 0.8)
+    #
+    # Note that in A21, CMOFS is tied to OOFS, so you can't change that one without
+    # undoing the effect on the other side of teh DRS4s
+    #
+    # DAC probably cares about OOFS being in a good spot... is it?
+    # As per DRS4 spec, 1.55V gives symmetric
+    # differential inputs of -0.5V to 0.5V.
+    # Set the non-swept values
+    # For both sides of the DRS rows
+
+    parser.add_argument('--oofs', metavar='OOFS', type=float, default=1.3, help='OOFS DAC output voltage')
+    parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.05, help='ROFS DAC output voltage')
+    parser.add_argument('--tcal', metavar='TCAL', type=float, default=0.84, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
+    parser.add_argument('--cmofs', metavar='CMOFS', type=float, default=1.2, help='CMOFS DAC output Voltage')
+    parser.add_argument('--bias', metavar='BIAS', type=float, default=0.7, help='BIAS DAC output Voltage')
+    
     return parser
+
+# DAC Channel mappings (in A21 crosshacked)
+# (these should be moved to lappdIfc.py)
+DAC_BIAS = 0
+DAC_ROFS = 1
+DAC_OOFS = 2
+DAC_CMOFS = 3
+DAC_TCAL_N1 = 4
+DAC_TCAL_N2 = 5
 
 def connect(parser):
     
@@ -59,6 +86,14 @@ def connect(parser):
         import datetime
         args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
 
+    # Set DAC voltages
+    ifc.DacSetVout(DAC_OOFS, args.oofs)
+    ifc.DacSetVout(DAC_CMOFS, args.cmofs)
+    ifc.DacSetVout(DAC_ROFS, args.rofs)
+    ifc.DacSetVout(DAC_BIAS, args.bias)
+    ifc.DacSetVout(DAC_TCAL_N1, args.tcal)
+    ifc.DacSetVout(DAC_TCAL_N2, args.tcal)
+    
     # Return a tuble with the interface and the arguments
     return (ifc, args, eventQueue)
 
