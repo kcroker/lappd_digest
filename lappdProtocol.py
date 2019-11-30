@@ -435,7 +435,7 @@ class event(object):
         raw_packets.append(eventpacker.pack(event_packet))
         return raw_packets
             
-    def __init__(self, packet, keep_offset=False, activePedestal=None):
+    def __init__(self, packet, keep_offset=False, activePedestal=None, mask=0):
 
         # Store a reference to the packet
         self.raw_packet = packet
@@ -466,6 +466,9 @@ class event(object):
 
         # Should I keep any offsets present in the data?
         self.keep_offset = keep_offset
+
+        # How much to mask?
+        self.mask = mask
         
         # Am I pedestalling?
         self.activePedestal = activePedestal
@@ -633,8 +636,7 @@ class event(object):
                 p = -(i + 1)
 
         p = subhits[0][0]
-        masklen = 100
-        for i in range(0, masklen):
+        for i in range(0, self.mask):
 
             # Left mask?
             amplitudes[p - i] = None
@@ -726,13 +728,13 @@ def export(anevent, eventQueue, dumpFile):
         print(e)
     
 # Multiprocess fork() entry point
-def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=None):
+def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, subtract=None):
 
     # If we pedestalling, load the pedestal
     activePedestal = None
-    if subtract:
-        activePedestal = pickle.load(open(subtract, "rb"))
-        print("Loaded pedestal file %s" % subtract, file=sys.stderr)
+    if args.subtract:
+        activePedestal = pickle.load(open(args.subtract, "rb"))
+        print("Loaded pedestal file %s" % args.subtract, file=sys.stderr)
 
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -747,8 +749,8 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
     orphanedHits = [] #collections.deque(maxlen=10000)
 
     # Open the dumpfile, if we were requested to make one
-    if dumpFile:
-        dumpFile = open("%s_%d" % (dumpFile, listen_tuple[1]), "wb")
+    if args.file:
+        args.file = open("%s_%d" % (args.file, listen_tuple[1]), "wb")
         
     # Release the semaphore lock
     print("Releasing initialization lock for port %d..." % listen_tuple[1], file=sys.stderr)
@@ -817,7 +819,7 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
 
                         # Did we complete one?
                         if currentEvents[tag].complete:
-                            export(currentEvents[tag], eventQueue, dumpFile)
+                            export(currentEvents[tag], eventQueue, args.file)
                             del(currentEvents[tag])
                             numCurrentEvents -= 1
                             
@@ -851,7 +853,7 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
                             # print("Registering new event %d from %s, timestamp %d" % (packet['evt_number'], *tag), file=sys.stderr)
                             
                             # Make an event from this packet
-                            currentEvents[tag] = event(packet, keep_offset, activePedestal)
+                            currentEvents[tag] = event(packet, args.offset, activePedestal, args.mask)
 
                             # And remove old ones if we are overflowing
                             numCurrentEvents += 1
@@ -874,7 +876,7 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
                             # Now, this event might have been completed by a bunch of orhpans
                             if currentEvents[tag].complete:
                                 #print("Orphans completed an event, pushing...", file=sys.stderr)
-                                export(currentEvents[tag], eventQueue, dumpFile)
+                                export(currentEvents[tag], eventQueue, args.file)
 
                                 # Remove it from the list
                                 del(currentEvents[tag])
@@ -900,9 +902,9 @@ def intake(listen_tuple, eventQueue, dumpFile=None, keep_offset=False, subtract=
             print("\nCaught SIGINT.", file=sys.stderr)
 
             # If there was a dumpFile, close it
-            if dumpFile:
+            if args.file:
                 print("\nClosing dump..", file=sys.stderr)
-                dumpFile.close()
+                args.file.close()
             
             print("At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (len(orphanedHits), len(currentEvents)), file=sys.stderr)
             

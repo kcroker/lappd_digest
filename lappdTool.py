@@ -29,6 +29,7 @@ def create(leader):
     parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
     parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
     parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
+    parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=0)
 
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
@@ -93,7 +94,8 @@ def connect(parser):
     ifc.DacSetVout(DAC_BIAS, args.bias)
     ifc.DacSetVout(DAC_TCAL_N1, args.tcal)
     ifc.DacSetVout(DAC_TCAL_N2, args.tcal)
-    
+
+    # Center the 
     # Return a tuble with the interface and the arguments
     return (ifc, args, eventQueue)
 
@@ -110,7 +112,7 @@ def spawn(args, eventQueue):
     intakeProcesses = [None]*args.threads
 
     for i in range(0, args.threads):
-        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args.file, args.offset, args.subtract))
+        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args))
         intakeProcesses[i].start()
 
         # Pin the processes

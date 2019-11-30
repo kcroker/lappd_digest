@@ -37,8 +37,12 @@ if args.i < 0:
 # If we are pedestalling, disable offset subtraction
 # so that we have absolute capacitor locations
 if args.pedestal:
+    print("Disabling offset subtraction during pedestal run...", file=sys.stderr)
     args.offset = True
 
+    print("Masking out 100 samples to the left of DENABLE...", file=sys.stderr)
+    args.mask = 100
+    
 # Are we using an external trigger?  If so, kill the delay
 if args.external:
     args.i = 0
@@ -81,6 +85,10 @@ human_readable = {
 for reg in [lappdIfc.DRSREFCLKRATIO, 0x620, lappdIfc.ADCBUFNUMWORDS]:
     val = ifc.brd.peeknow(reg)
     print("#\t%s (%s) = %d" % (human_readable[reg], hex(reg), val))
+
+# Dump some run flags
+print("# Capacitor ordered: %d" % 1 if args.offset else 0)
+print("# Subtracted: %s" % args.subtract)
 
 # Make it pretty
 print("#")
