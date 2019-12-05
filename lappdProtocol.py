@@ -625,15 +625,15 @@ class event(object):
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
         # during the stop process
-        p = subhits[0][0]
-        masklen = 5
-        for i in range(0, masklen):
+        # p = subhits[0][0]
+        # masklen = 5
+        # for i in range(0, masklen):
 
-            # Right mask
-            amplitudes[p + i] = None
+        #     # Right mask
+        #     amplitudes[p + i] = None
 
-            if p + (i + 1) == current_hit.max_samples:
-                p = -(i + 1)
+        #     if p + (i + 1) == current_hit.max_samples:
+        #         p = -(i + 1)
 
         p = subhits[0][0]
         for i in range(0, self.mask):
