@@ -60,6 +60,17 @@ for voltage in (args.low, args.high):
         # Give some output
         print("Received data for TCAL_N = %f" % voltage, file=sys.stderr)
 
+############# BEGIN COMMON TOOL FOOTER
+
+# Once we have all the events we need, go ahead and reap the listeners.
+# If not, you are going to possible fill up with tons of hardware triggers
+# and choke out.
+
+# Reap listeners
+lappdTool.reap(intakeProcesses)
+
+############# END COMMON TOOL FOOTER 
+
 # Get the channel list
 # (the * expands the iterator)
 chans = [*evts[0].channels.keys()]
@@ -129,9 +140,3 @@ for channel, results in slopes.items():
         print("%d %e %e %d" % (cap, value[0], value[1], channel))
     print("# END OF CHANNEL %d\n" % channel)
         
-############# BEGIN COMMON TOOL FOOTER
-
-# Reap listeners
-lappdTool.reap(intakeProcesses)
-
-############# END COMMON TOOL FOOTER 

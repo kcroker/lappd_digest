@@ -28,9 +28,8 @@ def create(leader):
     parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
     parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
     parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
-    parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
+    parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')\
     parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=100)
-    parser.add_argument('-g', '--gain', metavar='GAIN_FILE',  help='Convert ADC counts into voltage using this gain profile')
 
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)

@@ -13,6 +13,9 @@ import lappdTool           # UX shortcuts: mixed board and protocol stuff
 # subsystem.  All tools will share the same baseline syntax and semantics.
 parser = lappdTool.create("Take TCA sin samples")
 
+# Since we want high precision here, add the option to correct per-capacitor gains
+parser.add_argument('-g', '--gain', metavar='GAIN_FILE',  help='Convert ADC counts into voltage using this gain profile')
+
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
 
@@ -79,12 +82,23 @@ lappdTool.reap(intakeProcesses)
 from scipy.stats import describe
 import math
 
+# Load the gain correction?
+gainCorrection = None
+if args.gain:
+    import pickle
+    gainCorrection = pickle.load(open(args.gain, "rb"))
+    print("Using gain file %s" % args.gain, file=sys.stderr)
+    
 # Now perform the timing calibration
 chans = evts[0].channels.keys()
 
 # Use notation consistent with Nishimura & Romero-Wolf
 xij = {}
 yij = {}
+
+# Set this up to do arbitrary steps
+step = 2
+starts = [0,1]
 
 for chan in chans:
 
@@ -95,6 +109,13 @@ for chan in chans:
     # Now go through the events
     for evt in evts:
 
+        # First, apply the gain correction (since we don't usually care enough about this elsewhere)
+        if gainCorrection:
+            for i in range(1024):
+                if not evt.channels[chan][i] is None:
+                    evt.channels[chan][i] *= gainCorrection[chan][i][0]
+            print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
+        
         # Go through the waveforms, stashing the squares already
         for i in range(1023):
             if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
@@ -122,3 +143,7 @@ for chan in chans:
         xij[chan][i] = math.atan(yij[chan][i].mean/xij[chan][i].mean)/(math.pi * 1e6)
 
         print("%e %d" % (xij[chan][i], chan))
+
+# Write out a binary timing file
+import pickle
+pickle.dump(xij, open("%s.timing" % evts[0].board_id.hex(), "wb"))
