@@ -435,7 +435,7 @@ class event(object):
         raw_packets.append(eventpacker.pack(event_packet))
         return raw_packets
             
-    def __init__(self, packet, keep_offset=False, activePedestal=None, mask=0):
+    def __init__(self, packet, keep_offset=False, activePedestal=None, activeGain=None, mask=0):
 
         # Store a reference to the packet
         self.raw_packet = packet
@@ -473,6 +473,9 @@ class event(object):
         # Am I pedestalling?
         self.activePedestal = activePedestal
 
+        # Am I converting to voltages?
+        self.activeGain = activeGain
+        
         # When was I made (profiling debugging)
         self.start = time.time()
         
@@ -622,18 +625,25 @@ class event(object):
             #print("Subtracting pedestals from data before taring...", file=sys.stderr)
             amplitudes = self.activePedestal.subtract(amplitudes, channel)
 
+        # Are we adjusting gains?  Do it now before masking and adjusting the zero offset.
+        if self.activeGain and channel in self.activeGain:
+            for i in range(1024):
+                amplitudes[i] *= self.activeGain[channel][i][0]
+                #            amplitudes = [x*self.activeGain[channel][cap][0] for cap,x in enumerate(amplitudes)]
+            
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
         # during the stop process
-        # p = subhits[0][0]
-        # masklen = 5
-        # for i in range(0, masklen):
+        p = subhits[0][0]
+        masklen = 5
 
-        #     # Right mask
-        #     amplitudes[p + i] = None
+        for i in range(0, masklen):
 
-        #     if p + (i + 1) == current_hit.max_samples:
-        #         p = -(i + 1)
+            # Right mask
+            amplitudes[p + i] = None
+
+            if p + (i + 1) == current_hit.max_samples:
+                p = -(i + 1)
 
         p = subhits[0][0]
         for i in range(0, self.mask):
@@ -734,8 +744,14 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     activePedestal = None
     if args.subtract:
         activePedestal = pickle.load(open(args.subtract, "rb"))
-        print("Loaded pedestal file %s" % args.subtract, file=sys.stderr)
+        print("Using pedestal file %s" % args.subtract, file=sys.stderr)
 
+    # Are we correcting gains?
+    activeGain = None
+    if args.gain:
+        activeGain = pickle.load(open(args.gain, "rb"))
+        print("Using gain file %s" % args.gain, file=sys.stderr)
+        
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind((socket.gethostbyname(listen_tuple[0]), listen_tuple[1]))
@@ -853,7 +869,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                             # print("Registering new event %d from %s, timestamp %d" % (packet['evt_number'], *tag), file=sys.stderr)
                             
                             # Make an event from this packet
-                            currentEvents[tag] = event(packet, args.offset, activePedestal, args.mask)
+                            currentEvents[tag] = event(packet, args.offset, activePedestal, activeGain, args.mask)
 
                             # And remove old ones if we are overflowing
                             numCurrentEvents += 1

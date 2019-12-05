@@ -18,7 +18,7 @@ def create(leader):
     
     parser.add_argument('board', metavar='IP_ADDRESS', type=str, help='IP address of the target board')
     parser.add_argument('N', metavar='NUM_SAMPLES', type=int, help='The number of samples to request')
-    parser.add_argument('-i', metavar='INTERVAL', type=float, default=0.01, help='The interval (seconds) between software triggers')
+    parser.add_argument('-i', metavar='INTERVAL', type=float, default=0.001, help='The interval (seconds) between software triggers')
 
     parser.add_argument('-t', '--threads', metavar="NUM_THREADS", type=int, help="Number of children to attach to distinct ports (to receive data in parallel on separate UDP buffers at the POSIX level.  Number of processors - 1 is a good choice.", default=1)
 
@@ -29,7 +29,8 @@ def create(leader):
     parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
     parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
     parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
-    parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=0)
+    parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=100)
+    parser.add_argument('-g', '--gain', metavar='GAIN_FILE',  help='Convert ADC counts into voltage using this gain profile')
 
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
