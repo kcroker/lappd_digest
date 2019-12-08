@@ -39,10 +39,16 @@ if args.i < 0:
 # If we are pedestalling, disable offset subtraction
 # so that we have absolute capacitor locations
 if args.pedestal:
+
+    # These conflict!
+    if args.subtract:
+        print("ERROR: You cannot subtract out a pedestal while taking a pedestal", file=sys.stderr)
+        exit(1)
+        
     print("Disabling offset subtraction during pedestal run...", file=sys.stderr)
     args.offset = True
 
-    print("Masking out 100 samples to the left of DENABLE...", file=sys.stderr)
+    print("Masking out 100 samples to the left of the stop sample...", file=sys.stderr)
     args.mask = 100
     
 # Are we using an external trigger?  If so, kill the delay
@@ -131,10 +137,6 @@ for i in range(0, args.N):
             # Push it onto the processing queue
             events.append(event)
 
-#            if not args.quiet:
-#                # Output the ascii dump
-#                lappdProtocol.dump(event)
-
         # Signal that we consumed something
         eventQueue.task_done()
         
@@ -160,8 +162,6 @@ if args.pedestal:
 
 elif not args.quiet:
 
-    from scipy.integrate import cumtrapz
-        
     # We are not building pedestals, so we probably want to apply calibrations
     # and see what we get
     if args.gain:

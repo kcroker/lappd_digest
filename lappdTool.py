@@ -27,10 +27,13 @@ def create(leader):
 
     parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help='Pedestal to subtract from incoming amplitude data')
     parser.add_argument('-a', '--aim', metavar='UDP_PORT', type=int, default=1338, help='Aim the given board at the given UDP port on this machine. Defaults to 1338')
-    parser.add_argument('-e', '--external', action="store_true", help='Do not send software triggers (i.e. expect an external trigger)')
+    parser.add_argument('-e', '--external', action="store_true", help='Enable hardware triggering and do not send software triggers.')
     parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
-    parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=100)
-   
+    parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=0)
+    parser.add_argument('-c', '--channels', metavar='CHANNELS', help="Comma separated string of channels. (Persistent)")
+
+    parser.add_argument('-w', '--wait', metavar='WAIT', type=int, help="Adjust delay between receipt of soft/hard trigger and sampling stop. (Persistant)")
+    
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
     #
@@ -95,6 +98,27 @@ def connect(parser):
     ifc.DacSetVout(DAC_TCAL_N1, args.tcal)
     ifc.DacSetVout(DAC_TCAL_N2, args.tcal)
 
+    # Set the channels?
+    if args.channels:
+        chans = list(map(int, args.channels.split(',')))
+        print("Specifying channels: ", chans, file=stderr)
+
+        high = 0
+        low = 0
+        for chan in chans:
+            if chan < 32:
+                low |= (1 << chan)
+            else:
+                high |= (1 << (chan - 32))
+            
+        ifc.brd.pokenow(0x670, low)
+        ifc.brd.pokenow(0x674, high)
+
+    # Set the wait?
+    if args.wait:
+        ifc.brd.pokenow(lappdIfc.DRSWAITSTART, args.wait)
+        print("Setting STOP delay to: %d" % args.wait, file=stderr)
+        
     # Center the 
     # Return a tuble with the interface and the arguments
     return (ifc, args, eventQueue)
@@ -114,7 +138,7 @@ def spawn(args, eventQueue):
     for i in range(0, args.threads):
         intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args))
         intakeProcesses[i].start()
-        
+
         # Pin the processes
         run(['taskset -p -c %d %d' % (i, intakeProcesses[i].pid)], stdout=stderr, shell=True)
 
