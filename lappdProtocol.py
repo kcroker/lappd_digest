@@ -77,7 +77,7 @@ class timing(object):
         self.dts = dts
 
         # Get a list of channels
-        self.chans = self.dts.keys()
+        self.chans = list(self.dts.keys())
         
         # Zero point (channel identifier)
         self.reference = reference
@@ -114,18 +114,18 @@ class timing(object):
         for chan in chans:
 
             stop_sample = event.offsets[chan]
-            timemap[chan] = []*1024
+            timemap[chan] = [0]*1024
 
             # Get the calibration channel appropriate for this actual channel
-            calibration_chan = self.chanmap[chan]
+            calibration_channel = self.chanmap[chan]
                         
             for i in range(stop_sample):
-                timemap[i] = self.left_offsets[calibration_channel][i]
+                timemap[chan][i] = self.left_offsets[calibration_channel][i]
 
             for i in range(stop_sample, 1024):
-                timemap[i] = self.right_offsets[calibration_channel][i]
-                if timemap[i] < mintime:
-                    mintime = timemap[i]
+                timemap[chan][i] = self.right_offsets[calibration_channel][i]
+                if timemap[chan][i] < mintime:
+                    mintime = timemap[chan][i]
                     self.shift = i
         
         return timemap
@@ -134,9 +134,9 @@ class timing(object):
     # Replace lists of amplitudes with a list of (time, amplitude) tuples 
     #
     def apply(self, event, timemap):
-        
+
         for chan in event.channels.keys():
-            event.channels[chan] = zip(timemap[chan], event.channels[chan])
+            event.channels[chan] = list(zip(timemap[chan], event.channels[chan]))
 
     #
     # Discard an existing timing calibration
@@ -295,11 +295,10 @@ class event(object):
                         self.variance[chan_id].append(nan)
                     else:
                         bs, bs, mean, variance, *bs = describe(cap)
-                        #avg = mean(cap)
-                        #self.mean[chan_id].append(avg)
-                        self.mean[chan_id].append(mean)
-                        self.variance[chan_id].append(variance)
-                        #self.variance[chan_id].append(variance(cap, xbar=avg))
+
+                        # Because the numpy method returns some ass-retarded type
+                        self.mean[chan_id].append(float(mean))
+                        self.variance[chan_id].append(float(variance))
                     
             # Remove the samples because python can't pickle it
             del(self.chan_list)
@@ -308,18 +307,9 @@ class event(object):
         # Return a pedestal subtracted list of amplitudes
         #
         def subtract(self, amplitudes, chan_id):
-            #if not chan_id in self.mean:
-            #    raise Exception("Given pedestal does not define channel %d" % chan_id)
-
-            # OOO This looks slow as balls
-            #adjusted = []
             length = len(self.mean[chan_id])
             for i in range(length):
                 amplitudes[i] -= self.mean[chan_id][i]
-                
-                #                adjusted.append(amplitudes[i] - self.mean[chan_id][i])
-
-                #return adjusted
             
         #
         # Generate a test pedestal, with normally distributed event samples
@@ -1057,7 +1047,7 @@ def dump(event):
     chans = list(event.channels.keys())
 
     # Unroll this
-    if not isinstance(event.channels[chans[0]], tuple):     
+    if not isinstance(event.channels[chans[0]][0], tuple):     
         for channel, amplitudes in event.channels.items():
             print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
 

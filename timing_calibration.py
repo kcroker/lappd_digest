@@ -136,8 +136,10 @@ for chan in chans:
 
         # This function, computing 4 moments, is faster than just computing
         # the damn average manually...
-        xij[chan][i] = describe(xij[chan][i])
-        yij[chan][i] = describe(yij[chan][i])
+        #
+        # XXX changed this from these numpy.float64's to regular python float...
+        xij[chan][i] = float(describe(xij[chan][i]).mean)
+        yij[chan][i] = float(describe(yij[chan][i]).mean)
 
         #
         # Assuming the integral average is a good approximation for this sample...
@@ -146,9 +148,10 @@ for chan in chans:
         #
         # Note: Our calibration oscillator is 100Mhz, so 1e8
         #
-        xij[chan][i] = math.atan(math.sqrt(yij[chan][i].mean/xij[chan][i].mean))/(math.pi * 1e8)
+        xij[chan][i] = math.atan(math.sqrt(yij[chan][i]/xij[chan][i]))/(math.pi * 1e8)
 
         print("%e %d" % (xij[chan][i], chan))
+        print("Computed \Delta_{%d, %d+1} for calibration channel %d" % (i, i+1, chan), file=sys.stderr)
 
 # Create a timing object
 

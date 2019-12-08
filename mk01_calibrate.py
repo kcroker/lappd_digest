@@ -54,6 +54,10 @@ if args.pedestal:
 # Are we using an external trigger?  If so, kill the delay
 if args.external:
     args.i = 0
+
+# If we gave a timing file, retain capacitor offsets in the packet-catcher
+if args.timing:
+    args.offset = True
     
 # Record a bunch of registers first
 # (Abhorrent magic numbers...)
@@ -171,13 +175,12 @@ elif not args.quiet:
     chans = events[0].channels.keys()
     timingCalibration = None
     
-    if args.timing and not args.keep_offset:
+    if args.timing and args.offset:
         timingCalibration = pickle.load(open(args.timing, "rb"))
     
-    # Apply all the amplitude corrections (surprisingly slow)
     for evt in events:
         
-        # Apply the gain calibration (precisely)
+        # Apply the gain calibration (precisely, slowly...)
         if args.gain:
             for i in range(1024):
                 if evt.channels[chan][i] is None:
@@ -185,13 +188,19 @@ elif not args.quiet:
                 evt.channels[chan][i] *= gainCalibration[chan][i][0]
 
         # This makes tuples
-        if args.timing and not args.keep_offset:
+        if args.timing and args.offset:
 
             # Compute the timing calibration
             timemap = timingCalibration.compute(evt)
-
+                        
             # Apply the timing calibration
             timingCalibration.apply(evt, timemap)
+
+            # Shift everything over
+            # timingCalibration.timeorder(evt)
             
         # Output the result
         lappdProtocol.dump(evt)
+
+        # Debug
+        print("Processed event %d" % evt.evt_number, file=sys.stderr)
