@@ -197,7 +197,7 @@ elif not args.quiet:
             timingCalibration.apply(evt, timemap)
 
             # Shift everything over
-            # timingCalibration.timeorder(evt)
+            timingCalibration.timeorder(evt)
             
         # Output the result
         lappdProtocol.dump(evt)

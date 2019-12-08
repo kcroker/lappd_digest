@@ -96,9 +96,39 @@ class timing(object):
         # Right and left offsets are computed relative to the stop sample
         self.left_offsets = {}
         self.right_offsets = {}
+
+        # sumdts = {}
+        # revsumdts = {}
+
+        # for chan in self.chans:
+
+        #     sumdts[chan] = [0]*1024
+        #     revsumdts[chan] = [0]*1024
+
+        #     sumdts[chan][0] = dts[chan][0]
+        #     for i in range(1,1024):
+        #         sumdts[chan][i] = sumdts[chan][i-1] + dts[chan][i]
+
+        #     revsumdts[chan][0] = dts[chan][1023]
+        #     for i in range(1, 1024):
+        #         revsumdts[chan][i] = revsumdts[chan][i-1] + dts[chan][1023 - i]
+
+                
+            #sumdts = cumsum(dts[chan])
+            #revsumdts = cumsum(tuple(reversed(dts[chan])))
+
+            #for g in zip(sumdts, revsumdts):
+            #    print("%e %e" % g)
+
+            #print("")
+        
+        #exit(6)
+        
         for chan in self.chans:
             self.left_offsets[chan] = [deltat_chip[chan] + x for x in cumsum(dts[chan])]
             self.right_offsets[chan] = [deltat_chip[chan] - x for x in cumsum(tuple(reversed(dts[chan])))]
+            #self.left_offsets[chan] = [deltat_chip[chan] + x for x in sumdts[chan]]
+            #self.right_offsets[chan] = [deltat_chip[chan] - x for x in revsumdts[chan]]
 
     #
     # Return a dictionary mapping capacitor positions to absolute times
@@ -153,8 +183,8 @@ class timing(object):
 
         for chan in event.channels.keys():
 
-            # Define the tare
-            tare = self.shift
+            # Define the tare (shift left, not right)
+            tare = 1024 - self.shift
 
             # HACKY because, in principle, the protocol supports different
             # numbers of channels on each 
