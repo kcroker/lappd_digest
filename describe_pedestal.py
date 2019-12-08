@@ -16,10 +16,12 @@ for chan in aPedestal.mean:
 
     n = 0
 
-    fmt = lambda x: x if not x is None else float('nan')
+    #fmt = lambda x: x if not x is None else float('nan')
     
     for mean, var in zip(aPedestal.mean[chan], aPedestal.variance[chan]):
-        print("%d %e %e" % (n, fmt(mean), fmt(var)))
+        #print(mean, var)
+    
+        print("%d %e %e %d" % (n, mean, var, chan))
         n += 1
 
     # Break on channel

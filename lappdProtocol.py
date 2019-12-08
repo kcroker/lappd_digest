@@ -57,6 +57,124 @@ doit = struct.Struct(">512h")
 # Force fragmentation (for generation only)
 globals()['LAPPD_MTU'] = 90
 
+class timing(object):
+
+    #
+    # Capacitor 0 is the common reference for all channels
+    #
+    def __init__(self, chanmap, dts, reference, deltat_chip):
+
+        from numpy import cumsum
+        
+        #
+        # lambda chan : an anonymous function that returns the calibration channel associated with the regular channel "chan"
+        #
+        #      e.g.  chanmap = lambda chan : 15 if chan < 16 else 55
+        #
+        self.chanmap = chanmap
+
+        # Individual capacitor pair differentials for each delay-line (so the calibration channels for each chip)
+        self.dts = dts
+
+        # Get a list of channels
+        self.chans = self.dts.keys()
+        
+        # Zero point (channel identifier)
+        self.reference = reference
+        
+        # Calibration line differentials (relative to the zero point channel's chip)
+        self.deltat_chip = deltat_chip
+
+        # By definition, the 
+        self.deltat_chip[self.reference] = 0.0
+
+        # (changes per event)
+        # Amount to shift left each waveform so that all times for all channels
+        # are monotonically increasing
+        self.shift = None
+        
+        # Right and left offsets are computed relative to the stop sample
+        self.left_offsets = {}
+        self.right_offsets = {}
+        for chan in self.chans:
+            self.left_offsets[chan] = [deltat_chip[chan] + x for x in cumsum(dts[chan])]
+            self.right_offsets[chan] = [deltat_chip[chan] - x for x in cumsum(tuple(reversed(dts[chan])))]
+
+    #
+    # Return a dictionary mapping capacitor positions to absolute times
+    # 
+    def compute(self, event):
+
+        timemap = {}
+
+        chans = event.channels.keys()
+        mintime = 0.0
+        self.shift = 0
+        
+        for chan in chans:
+
+            stop_sample = event.offsets[chan]
+            timemap[chan] = []*1024
+
+            # Get the calibration channel appropriate for this actual channel
+            calibration_chan = self.chanmap[chan]
+                        
+            for i in range(stop_sample):
+                timemap[i] = self.left_offsets[calibration_channel][i]
+
+            for i in range(stop_sample, 1024):
+                timemap[i] = self.right_offsets[calibration_channel][i]
+                if timemap[i] < mintime:
+                    mintime = timemap[i]
+                    self.shift = i
+        
+        return timemap
+
+    #
+    # Replace lists of amplitudes with a list of (time, amplitude) tuples 
+    #
+    def apply(self, event, timemap):
+        
+        for chan in event.channels.keys():
+            event.channels[chan] = zip(timemap[chan], event.channels[chan])
+
+    #
+    # Discard an existing timing calibration
+    #
+    def remove(self, event):
+        for chan in event.channels.keys():
+            event.channels[chan] = list(list(zip(*event.channels[chan]))[0])
+    
+    #
+    # "Barrel shift" the event so that the stop sample is the first sample
+    # in the list (time order)
+    #
+    def timeorder(self, event):
+
+        for chan in event.channels.keys():
+
+            # Define the tare
+            tare = self.shift
+
+            # HACKY because, in principle, the protocol supports different
+            # numbers of channels on each 
+            max_samples = 1024
+            
+            # Since we are not memory limited in 2019, just do an offset copy
+            tmp = [0]*max_samples
+
+            # Minimize computations
+            delta = max_samples - tare
+
+            # Do the head of the final list...
+            tmp[:delta] = event.channels[chan][tare:max_samples]
+
+            # ... and the tail
+            tmp[delta:] = event.channels[chan][0:tare]
+
+            # Replace amplitudes
+            event.channels[chan] = tmp
+
 # Define an event class
 class event(object):
 
@@ -126,8 +244,7 @@ class event(object):
         def __init__(self, samples):
 
             # Now compute the pedestals
-            from statistics import variance
-            from statistics import mean
+            from scipy.stats import describe
             
             # Did we receive any samples?
             if not len(samples):
@@ -166,19 +283,23 @@ class event(object):
                             caps[capacitor].append(ampl)
 
                 # Now we have it in filtered capacitor form
+                nan = float('nan')
                 for cap in caps:
                     # Cap is a list
                     N = len(cap)
                     if N == 0:
-                        self.mean[chan_id].append(None)
-                        self.variance[chan_id].append(None)
+                        self.mean[chan_id].append(nan)
+                        self.variance[chan_id].append(nan)
                     elif N == 1:
                         self.mean[chan_id].append(cap)
-                        self.variance[chan_id].append(None)
+                        self.variance[chan_id].append(nan)
                     else:
-                        avg = mean(cap)
-                        self.mean[chan_id].append(avg)
-                        self.variance[chan_id].append(variance(cap, xbar=avg))
+                        bs, bs, mean, variance, *bs = describe(cap)
+                        #avg = mean(cap)
+                        #self.mean[chan_id].append(avg)
+                        self.mean[chan_id].append(mean)
+                        self.variance[chan_id].append(variance)
+                        #self.variance[chan_id].append(variance(cap, xbar=avg))
                     
             # Remove the samples because python can't pickle it
             del(self.chan_list)
@@ -187,18 +308,18 @@ class event(object):
         # Return a pedestal subtracted list of amplitudes
         #
         def subtract(self, amplitudes, chan_id):
-            if not chan_id in self.mean:
-                raise Exception("Given pedestal does not define channel %d" % chan_id)
+            #if not chan_id in self.mean:
+            #    raise Exception("Given pedestal does not define channel %d" % chan_id)
 
             # OOO This looks slow as balls
-            adjusted = []
-            for i in range(0, len(self.mean[chan_id])):
-                if not self.mean[chan_id][i] is None and not amplitudes[i] is None:
-                    adjusted.append(amplitudes[i] - self.mean[chan_id][i])
-                else:
-                    adjusted.append(None)
-                    
-            return adjusted
+            #adjusted = []
+            length = len(self.mean[chan_id])
+            for i in range(length):
+                amplitudes[i] -= self.mean[chan_id][i]
+                
+                #                adjusted.append(amplitudes[i] - self.mean[chan_id][i])
+
+                #return adjusted
             
         #
         # Generate a test pedestal, with normally distributed event samples
@@ -571,7 +692,12 @@ class event(object):
 
     #
     # This converts a channel (as a hitstash object) into a Python integer list 
-    # 
+    #
+    # OOO 2
+    #  1)  2^x modulo *can* be done fast...
+    #      << (width - x) then >> (width - x)
+    #  2)  Use memoryviews to directly index into the memory
+    #
     def translate(self, current_hit, channel):
                     
         # Notice that we sort the dictionary by sequence numbers!
@@ -620,7 +746,8 @@ class event(object):
         # Are we pedestalling?  Do it now before we adjust the zero offset
         if self.activePedestal:
             #print("Subtracting pedestals from data before taring...", file=sys.stderr)
-            amplitudes = self.activePedestal.subtract(amplitudes, channel)
+            #amplitudes =
+            self.activePedestal.subtract(amplitudes, channel)
             
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
@@ -645,14 +772,13 @@ class event(object):
             if p - (i + 1) < 0:
                 p = current_hit.max_samples + i
          
-        # Are we trying to zero offset?
+        # # Are we trying to zero offset?
         if not self.keep_offset:
 
             # This is the first sampled capacitor position, in time
             tare = subhits[0][0]
             #print("Taring the final amplitude list by %d..." % tare, file=sys.stderr)
                 
-            # Never do a modulo in a loop computation, god
             # Since we are not memory limited in 2019, just do an offset copy
             tmp = [0]*(current_hit.max_samples)
 
@@ -915,7 +1041,8 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         except SystemExit:
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
             break
-        
+
+               
 #
 # Utility function to dump a pedestal subtracted event
 #
@@ -925,12 +1052,26 @@ def dump(event):
 
     # A quick formatter
     fmt = lambda x : float('nan') if x is None else x
-    
-    for channel, amplitudes in event.channels.items():
-        print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
-        for t, ampl in enumerate(amplitudes):
-            print("%d %e %d" % (t, fmt(ampl), channel))
-        print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
-        
+
+    # See if we have tuples, or just a raw list
+    chans = list(event.channels.keys())
+
+    # Unroll this
+    if not isinstance(event.channels[chans[0]], tuple):     
+        for channel, amplitudes in event.channels.items():
+            print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
+
+            for n, ampl in enumerate(amplitudes):
+                print("%d %e %d" % (n, fmt(ampl), channel))
+            print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
+    else:
+        for channel, amplitudes in event.channels.items():
+            print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
+
+            for t, ampl in amplitudes:
+                print("%e %e %d" % (t, fmt(ampl), channel))
+            print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
+   
+            
     # End this detection (because \n, this will have an additional newline)
     print("# END OF EVENT %d\n" % event.evt_number)

@@ -15,6 +15,7 @@ parser = lappdTool.create("Take TCA sin samples")
 
 # Since we want high precision here, add the option to correct per-capacitor gains
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE',  help='Convert ADC counts into voltage using this gain profile')
+parser.add_argument('-D', '--deltas', metavar='CHIP_DELTAS_FILE', help='Input externally measured interchip timing offsets')
 
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
@@ -63,6 +64,9 @@ for i in range(0, args.N):
     
     # Add some info and stash it
     evts.append(evt)
+
+    # Signal that we got it?
+    eventQueue.task_done()
 
 # Restore old channel masks
 ifc.brd.pokenow(0x670, masklow)
@@ -138,12 +142,34 @@ for chan in chans:
         #
         # Assuming the integral average is a good approximation for this sample...
         # Then:
-        #    atan(<y^2>/<x^2>)/(\pi 1e6) = \Delta_{ij}
+        #    atan(sqrt(<y^2>/<x^2>))/(\pi 1e8) = \Delta_{ij}
         #
-        xij[chan][i] = math.atan(yij[chan][i].mean/xij[chan][i].mean)/(math.pi * 1e6)
+        # Note: Our calibration oscillator is 100Mhz, so 1e8
+        #
+        xij[chan][i] = math.atan(math.sqrt(yij[chan][i].mean/xij[chan][i].mean))/(math.pi * 1e8)
 
         print("%e %d" % (xij[chan][i], chan))
 
+# Create a timing object
+
+# For now, just set the interchip timing delays to zero
+# XXX Read these in, if given...
+deltat_chip = {}
+for chan in xij.keys():
+    deltat_chip[chan] = 0.0
+
+# Set the reference channel to be DRS2's TCA line
+reference = 15
+
+# Make a channel mapping
+
+chanmap = {}
+for i in range(15):
+    chanmap[i] = 15
+
+for i in range(55-8, 55):
+    chanmap[i] = 55
+
 # Write out a binary timing file
 import pickle
-pickle.dump(xij, open("%s.timing" % evts[0].board_id.hex(), "wb"))
+pickle.dump(lappdProtocol.timing(chanmap, xij, reference, deltat_chip), open("%s.timing" % evts[0].board_id.hex(), "wb"))

@@ -23,6 +23,8 @@ parser = lappdTool.create('Get calibration data from Eevee boards speaking proto
 parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
 parser.add_argument('-q', '--quiet', action="store_true", help='Do not dump anything to stdout.')
 parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before intaking any events')
+parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
+parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Output amplitude-calibrated data (in volts)')
 
 # Connect it up
 ifc, args, eventQueue = lappdTool.connect(parser)
@@ -88,70 +90,29 @@ for reg in [lappdIfc.DRSREFCLKRATIO, 0x620, lappdIfc.ADCBUFNUMWORDS]:
 
 # Dump some run flags
 print("# Capacitor ordered: %d" % 1 if args.offset else 0)
-print("# Subtracted: %s" % args.subtract)
+print("# Pedestal subtracted: %s" % args.subtract)
+print("# Amplitude scaled: %s" % args.gain)
+print("# Timing applied: %s" % args.timing)
 
 # Make it pretty
 print("#")
-
-#
-# XXX Blocked queries broken in Mark I *hardware* 
-# (rapid register accesses for external devices not safe)
-#
-# # Queue these registers
-# ifc.brd.peek(regs)
-
-# # Queue any additionally requested registers
-# if args.registers:
-#     ifc.brd.peek(args.registers)
-
-# # Query all registers at once
-# responses = ifc.brd.transact()
-
-# # Write them out
-# print("# System register values before run: ")
-# for reg,val in responses[0].payload.items():
-#     print("# %s: %s" % (hex(reg), hex(val)))  
-
-# if args.registers:
-#     print("# Additional register values before run: ")
-#     for reg,val in responses[1].payload.items():
-#         print("# %s: %s" % (hex(reg), hex(val)))  
 
 # The __name__ check is mandatory
 if __name__ == '__main__':
     intakeProcesses = lappdTool.spawn(args, eventQueue)
 
-
-# # Are we just listening?
-# if args.listen == '0.0.0.0':
-#     while args.N > 0:
-#         try:
-#             # Grab an event
-#             event = eventQueue.get()
-
-#             # Output it
-#             print("Event %d:\n\tReconstruction time: %e seconds\n\tQueue delay: %e seconds" % (event.evt_number, event.finish - event.start, time.time() - event.prequeue), file=sys.stderr)
-
-#             #if not args.quiet:
-#             lappd.dump(event)
-                
-#             args.N -= 1
-
-#             # Explicitly free the memory
-#             eventQueue.task_done()
-#             del(event)
-            
-#         except Exception as e:
-#             import traceback
-#             traceback.print_exc(file=sys.stderr)
-
-# # So we are not just listening, lets do something
-
+# Turn on the external trigger, if it was requested and its off
+triggerToggled = False
+if args.external:
+    triggerToggled = ifc.brd.peeknow(0x370)
+    if not (triggerToggled & 1 << 5):
+        ifc.brd.pokenow(0x370, triggerToggled | (1 << 5))
+        
 events = []
 import time
 
 for i in range(0, args.N):
-    # --- Note that these are magic numbers...
+
     if not args.external:
         # Suppress board readback and response!
         ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
@@ -170,15 +131,19 @@ for i in range(0, args.N):
             # Push it onto the processing queue
             events.append(event)
 
-            if not args.quiet:
-                # Output the ascii dump
-                lappdProtocol.dump(event)
+#            if not args.quiet:
+#                # Output the ascii dump
+#                lappdProtocol.dump(event)
 
         # Signal that we consumed something
         eventQueue.task_done()
         
     except queue.Empty:
         print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
+
+# Turn off the extenal trigger if we turned it on
+if triggerToggled:
+    ifc.brd.pokenow(0x370, triggerToggled & ~(1 << 5))
 
 # We're finished, so clean up the listeners
 lappdTool.reap(intakeProcesses)
@@ -192,3 +157,41 @@ if args.pedestal:
     # Write it out
     if len(events) > 0:
         pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
+
+elif not args.quiet:
+
+    from scipy.integrate import cumtrapz
+        
+    # We are not building pedestals, so we probably want to apply calibrations
+    # and see what we get
+    if args.gain:
+        gainCalibration = pickle.load(open(args.gain, "rb"))
+        
+    # Should be a flag for precision adjustment, or very rapidly adjust by the average
+    chans = events[0].channels.keys()
+    timingCalibration = None
+    
+    if args.timing and not args.keep_offset:
+        timingCalibration = pickle.load(open(args.timing, "rb"))
+    
+    # Apply all the amplitude corrections (surprisingly slow)
+    for evt in events:
+        
+        # Apply the gain calibration (precisely)
+        if args.gain:
+            for i in range(1024):
+                if evt.channels[chan][i] is None:
+                    continue
+                evt.channels[chan][i] *= gainCalibration[chan][i][0]
+
+        # This makes tuples
+        if args.timing and not args.keep_offset:
+
+            # Compute the timing calibration
+            timemap = timingCalibration.compute(evt)
+
+            # Apply the timing calibration
+            timingCalibration.apply(evt, timemap)
+            
+        # Output the result
+        lappdProtocol.dump(evt)
