@@ -1,46 +1,47 @@
-*WARNING:* for all of these, the stdout buffer will not flush unless you force it to. So I just Ctrl+C to kill the
-process, which forces "output" to be fully written.
-
-## Taking pedestals
+## Initializing and taking pedestals
 
 ```
-./mk01_calibrate.py -p 10.0.6.212 1000 0.001 > ascii_pedestals
+./mk01_calibrate.py -Ipq -w 14 -c "12, 13, 14, 15, 48, 55" 10.0.6.212 1000
 ```
 
-This will:
+This will initialize (`-I`) the board at 10.0.6.212, enable channels (`-c`) 12-15, 48, and 55, set a delay of 14 units between trigger and stopping sampling (`-w`), and build a pedestal (`-p`) with 1000 samples.  It will do so quietly (`-q`): no ASCII dumps of waveforms to stdout.
+The produced pedestal file will be `<boardhex>.pedestal`.
 
-1. Build a pedestal file for the board at 10.0.6.212, from 1000 soft triggers, issued 0.001(+event reconstruction) delay
-2. Dump all the raw ASCII amplitudes to `ascii_pedestals`
-3. Offsets are not subtracted in the stdout dump, so you are looking at capacitor identities in the delay line (i.e. -o flag is automatically implied by -p)
-
-## Getting pedestal subtracted noise
+## Getting pedestal subtracted data (no timing calibration)
 
 ```
-./mk01_calibrate.py -o -s 111111111111.pedestal 10.0.6.212 60 0.1 > subtracted_noise
+./mk01_calibrate.py -e -s <boardhex>.pedestal -c "12, 14" 10.0.6.212 10000 > pulses_DDMMYYYY
 ```
 
-This will:
+This will capture 10k hardware-triggered events (`-e`) from channels 12 and 14 of the board at 10.0.6.212, subtracting (`-s`) the given pedestal file, and dumping the ASCII of all these waveforms to `pulses_DDMMYYYY`.
 
-1. Use the pedestal build for the board with MAC address 11:11:11:11:11:11
-2. Issue 60 soft triggers 100ms apart
-3. Write out ASCII plottable data of the events as the come in, pedstal subtracted
-4. The -o flag keeps the data at its original positions, so that it is capacitor ordered (not time ordered)
+## Getting per-capacitor gain calibrations
 
-## Listening to whatever comes in on port 5858
+This is necessary for precision timing calibration.  It does not require a pedestal.
 
 ```
-./mk01_calibrate.py -l -a 5858 ignored 1 0 > ascii_events
+./gain_calibration.py 10.0.6.212 10000 0.7 1.0
+
 ```
 
-1. This listens to UDP port 5858 (on all interfaces) for MK01 events, and dumps them
-in *time order*.  So the 0th sample will correspond to the first sample read in time.
+This will measure per-capacitor gains, averaged over a sample of 10k software triggered events.
+This is done by computing the slope between 0.7V and 1.0V.
+This will do an ASCII dump of the gains, as well as produce a `<boardhex>.gains` file.
+These values are reasonably close to the zero point, which is currently around 0.84V.
 
-Note that no control commands are issued to any boards.
+## Building a timing calibration
 
-# To get higher speeds
-Cannot use recvmmsg() in Python, since this is a Linux specific socket API extension.
-Ugh.  I can try to write this into Python, I'm surprised no one has done this yet....
+This will build a `<boardhex>.timing` file by issuing software triggers.
+This requires a pedestal file.
 
-tx and rx queues are not supported on all NIC hardware, so we can't depend on them either.
+```
+./timing_calibration.py -s <boardhex>.pedestal -g <boardhex>.gains 10.0.6.212 10000 > ascii_dts
 
-Lets see how multiprocess handling of the data flow works...
+```
+
+This will determine the temporal differences between adjacent capacitors in the delay lines, using calibration channels.
+The pedestal (`-s`) is mandatory, and the gain correction (`-g`) is suggested.
+
+## Notes
+1. Software trigger rate is, by default, 1kHz.
+2. The default operating DAC voltages values here are always reset at any tool run, and can be read from the comment headers of ./mk01_calibrate output

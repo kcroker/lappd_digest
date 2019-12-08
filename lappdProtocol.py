@@ -132,7 +132,7 @@ class timing(object):
 
     #
     # Return a dictionary mapping capacitor positions to absolute times
-    # 
+    #
     def compute(self, event):
 
         timemap = {}
