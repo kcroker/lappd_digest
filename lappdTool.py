@@ -33,7 +33,8 @@ def create(leader):
     parser.add_argument('-c', '--channels', metavar='CHANNELS', help="Comma separated string of channels. (Persistent)")
 
     parser.add_argument('-w', '--wait', metavar='WAIT', type=int, help="Adjust delay between receipt of soft/hard trigger and sampling stop. (Persistant)")
-    
+    parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
+
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
     #

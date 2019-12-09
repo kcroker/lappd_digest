@@ -87,43 +87,15 @@ class timing(object):
 
         # By definition, the 
         self.deltat_chip[self.reference] = 0.0
-
-        # (changes per event)
-        # Amount to shift left each waveform so that all times for all channels
-        # are monotonically increasing
-        self.shift = None
-        
+ 
         # Right and left offsets are computed relative to the stop sample
         self.left_offsets = {}
         self.right_offsets = {}
 
-        # sumdts = {}
-        # revsumdts = {}
+        # DELIVERABLE
+        # Timing maps for direct lookup
+        self.timemap = {}
 
-        # for chan in self.chans:
-
-        #     sumdts[chan] = [0]*1024
-        #     revsumdts[chan] = [0]*1024
-
-        #     sumdts[chan][0] = dts[chan][0]
-        #     for i in range(1,1024):
-        #         sumdts[chan][i] = sumdts[chan][i-1] + dts[chan][i]
-
-        #     revsumdts[chan][0] = dts[chan][1023]
-        #     for i in range(1, 1024):
-        #         revsumdts[chan][i] = revsumdts[chan][i-1] + dts[chan][1023 - i]
-
-                
-            #sumdts = cumsum(dts[chan])
-            #revsumdts = cumsum(tuple(reversed(dts[chan])))
-
-            #for g in zip(sumdts, revsumdts):
-            #    print("%e %e" % g)
-
-            #print("")
-        
-        #exit(6)
-        
         for chan in self.chans:
             self.left_offsets[chan] = []
             self.right_offsets[chan] = []
@@ -138,6 +110,32 @@ class timing(object):
                 # NOTE: thing[-0:] = entire list
                 self.right_offsets[chan].append(deltat_chip[chan] - sum(dts[chan][-(1024-i):]))
 
+        # And all possible shifts, which depend
+        # on where you stop
+        self.shift = [0]*1024
+
+        mintime = 0.0
+        for chan in self.chans:
+
+            # Now make all possible timing maps
+            self.timemap[chan] = {}
+
+            for stop in range(1024):
+                self.timemap[chan][stop] = [0]*1024
+                
+                for i in range(stop):
+                    self.timemap[chan][stop][i] = self.left_offsets[chan][i]
+
+                for i in range(stop, 1024):
+                    self.timemap[chan][stop][i] = self.right_offsets[chan][i]
+                    if self.timemap[chan][stop][i] < mintime:
+                        mintime = self.timemap[chan][stop][i]
+                        self.shift[stop] = i
+
+        # Cleanup
+        del(self.left_offsets)
+        del(self.right_offsets)
+            
     #
     # Return a dictionary mapping capacitor positions to absolute times
     #
@@ -171,10 +169,10 @@ class timing(object):
     #
     # Replace lists of amplitudes with a list of (time, amplitude) tuples 
     #
-    def apply(self, event, timemap):
+    def apply(self, event):
 
         for chan in event.channels.keys():
-            event.channels[chan] = list(zip(timemap[chan], event.channels[chan]))
+            event.channels[chan] = list(zip(self.timemap[self.chanmap[chan]][event.offsets[chan]], event.channels[chan]))
 
     #
     # Discard an existing timing calibration
@@ -192,7 +190,7 @@ class timing(object):
         for chan in event.channels.keys():
 
             # Define the tare (shift left, not right)
-            tare = 1024 - self.shift
+            tare = 1024 - self.shift[event.offsets[chan]]
 
             # HACKY because, in principle, the protocol supports different
             # numbers of channels on each 
@@ -592,7 +590,7 @@ class event(object):
         raw_packets.append(eventpacker.pack(event_packet))
         return raw_packets
             
-    def __init__(self, packet, keep_offset=False, activePedestal=None, mask=0):
+    def __init__(self, packet, keep_offset=False, activePedestal=None, activeTiming=None, mask=0):
 
         # Store a reference to the packet
         self.raw_packet = packet
@@ -630,6 +628,9 @@ class event(object):
         # Am I pedestalling?
         self.activePedestal = activePedestal
 
+        # Am I applying timing calibration?
+        self.activeTiming = activeTiming
+        
         # When was I made (profiling debugging)
         self.start = time.time()
         
@@ -870,11 +871,34 @@ def export(anevent, eventQueue, dumpFile):
     # For profiling of event reconstruction and
     # queueing
     anevent.finish = time.time()
-                                                    
-    # Recover: ~1 + ~1 + ~1 + 30 + sizeof(compiled bitstruct)= > 33+ bytes
-    del(anevent.remaining_hits, anevent.complete, anevent.chunks, anevent.raw_packet)
+
+    #
+    # Recover as much space as possible
+    # OOO Might be better to make an event nucleus
+    #     and just send the nucleus
+    #
+    del(anevent.remaining_hits,
+        anevent.complete,
+        anevent.chunks,
+        anevent.raw_packet,
+        anevent.activePedestal)
+    
     if hasattr(anevent, 'unpacker'):
         del(anevent.unpacker)
+
+    # Apply the timing calibration if its present
+    if anevent.activeTiming:
+        # Compute the timing calibration
+        # timemap = anevent.activeTiming.compute(anevent)
+                        
+        # Apply the timing calibration
+        anevent.activeTiming.apply(anevent)
+
+        # Shift everything over
+        anevent.activeTiming.timeorder(anevent)
+
+    # Now remove these
+    del(anevent.activeTiming)
 
     try:
         
@@ -900,6 +924,13 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         activePedestal = pickle.load(open(args.subtract, "rb"))
         print("Using pedestal file %s" % args.subtract, file=sys.stderr)
 
+    # If we are doing on the fly timing corrections
+    # load the timing file
+    activeTiming = None
+    if args.timing:
+        activeTiming = pickle.load(open(args.timing, "rb"))
+        print("Using timing file %s" % args.timing, file=sys.stderr)
+        
     # Usually, we only intake a certain number of events
     maxEvents = math.floor(args.N/args.threads)
     print("Listening for %d events..." % maxEvents, file=sys.stderr)
@@ -1024,15 +1055,16 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                             # print("Registering new event %d from %s, timestamp %d" % (packet['evt_number'], *tag), file=sys.stderr)
                             
                             # Make an event from this packet
-                            currentEvents[tag] = event(packet, args.offset, activePedestal, args.mask)
+                            currentEvents[tag] = event(packet, args.offset, activePedestal, activeTiming, args.mask)
 
                             # And remove old ones if we are overflowing
+                            # XXX This is still not finished being implemented!
                             numCurrentEvents += 1
                             if numCurrentEvents > 100:
                                 old = currentEvents.popitem(last=False)
 
                                 # It would be better to dump this event, even if its incomplete...
-                                
+
                                 # This should delete all references to the hitstash inside the object
                                 del(old)
 

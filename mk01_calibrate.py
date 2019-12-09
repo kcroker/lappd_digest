@@ -23,7 +23,6 @@ parser = lappdTool.create('Get calibration data from Eevee boards speaking proto
 parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
 parser.add_argument('-q', '--quiet', action="store_true", help='Do not dump anything to stdout.')
 parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before intaking any events')
-parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Output amplitude-calibrated data (in volts)')
 
 # Connect it up
@@ -174,38 +173,24 @@ elif not args.quiet:
 
     # We are not building pedestals, so we probably want to apply calibrations
     # and see what we get
-    if args.gain:
-        gainCalibration = pickle.load(open(args.gain, "rb"))
+    #if args.gain:
+    #    gainCalibration = pickle.load(open(args.gain, "rb"))
         
     # Should be a flag for precision adjustment, or very rapidly adjust by the average
     chans = events[0].channels.keys()
-    timingCalibration = None
-    
-    if args.timing and args.offset:
-        timingCalibration = pickle.load(open(args.timing, "rb"))
-    
+
     for evt in events:
         
         # Apply the gain calibration (precisely, slowly...)
-        if args.gain:
-            for chan in chans:
-                for i in range(1024):
-                    if evt.channels[chan][i] is None:
-                        continue
-                    evt.channels[chan][i] *= gainCalibration[15 if chan < 16 else 55][i][0]
+        #
+        # (if the are tuples because timing was applied, this won't work)
+        #if args.gain:
+        #    for chan in chans:
+        #        for i in range(1024):
+        #            if evt.channels[chan][i] is None:
+        #                continue
+        #            evt.channels[chan][i] *= gainCalibration[15 if chan < 16 else 55][i][0]
 
-        # This makes tuples
-        if args.timing and args.offset:
-
-            # Compute the timing calibration
-            timemap = timingCalibration.compute(evt)
-                        
-            # Apply the timing calibration
-            timingCalibration.apply(evt, timemap)
-
-            # Shift everything over
-            timingCalibration.timeorder(evt)
-            
         # Output the result
         lappdProtocol.dump(evt)
 
