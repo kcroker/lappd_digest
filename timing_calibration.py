@@ -167,10 +167,10 @@ reference = 15
 # Make a channel mapping
 
 chanmap = {}
-for i in range(15):
+for i in range(16):
     chanmap[i] = 15
 
-for i in range(55-8, 55):
+for i in range(55-8, 56):
     chanmap[i] = 55
 
 # Write out a binary timing file

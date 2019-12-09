@@ -182,10 +182,11 @@ elif not args.quiet:
         
         # Apply the gain calibration (precisely, slowly...)
         if args.gain:
-            for i in range(1024):
-                if evt.channels[chan][i] is None:
-                    continue
-                evt.channels[chan][i] *= gainCalibration[chan][i][0]
+            for chan in chans:
+                for i in range(1024):
+                    if evt.channels[chan][i] is None:
+                        continue
+                    evt.channels[chan][i] *= gainCalibration[15 if chan < 16 else 55][i][0]
 
         # This makes tuples
         if args.timing and args.offset:

@@ -125,10 +125,18 @@ class timing(object):
         #exit(6)
         
         for chan in self.chans:
-            self.left_offsets[chan] = [deltat_chip[chan] + x for x in cumsum(dts[chan])]
-            self.right_offsets[chan] = [deltat_chip[chan] - x for x in cumsum(tuple(reversed(dts[chan])))]
-            #self.left_offsets[chan] = [deltat_chip[chan] + x for x in sumdts[chan]]
-            #self.right_offsets[chan] = [deltat_chip[chan] - x for x in revsumdts[chan]]
+            self.left_offsets[chan] = []
+            self.right_offsets[chan] = []
+
+            # Iterate over possible stop samples
+            for i in range(1024):
+
+                # Things to the left of stop accumulate time up until stop
+                self.left_offsets[chan].append(deltat_chip[chan] + sum(dts[chan][:i]))
+
+                # Things to the right of stop accumulate negative time heading toward stop
+                # NOTE: thing[-0:] = entire list
+                self.right_offsets[chan].append(deltat_chip[chan] - sum(dts[chan][-(1024-i):]))
 
     #
     # Return a dictionary mapping capacitor positions to absolute times
@@ -157,7 +165,7 @@ class timing(object):
                 if timemap[chan][i] < mintime:
                     mintime = timemap[chan][i]
                     self.shift = i
-        
+
         return timemap
 
     #
