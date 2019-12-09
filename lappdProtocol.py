@@ -213,6 +213,117 @@ class timing(object):
             # Replace amplitudes
             event.channels[chan] = tmp
 
+#
+# Utility class to compute pedestals from a list of events
+#
+class pedestal(object):
+
+    def __init__(self, samples):
+
+        # Now compute the pedestals
+        from scipy.stats import describe
+
+        # Did we receive any samples?
+        if not len(samples):
+            raise Exception("Did not receive any samples!")
+
+        # Some board information
+        self.board_id = samples[0].board_id
+
+        # Use the first event to determine the list of channels
+        self.chan_list = samples[0].channels.keys()
+
+        # Sanity checks on the pedestal samples
+        for sample in samples:
+
+            if not isinstance(sample, event):
+                raise Exception("Encountered non-event in list of samples.  Nonsense.")
+
+            if not self.chan_list == sample.channels.keys():
+                raise Exception("Provided sample events for pedestaling have inhomogeneous channel content.  This .... is ... U N A C C E P T A B L E E E E ---- U N A C C E P T A B L E E E E E E E")
+            if not sample.keep_offset:
+                raise Exception("Refusing to build pedestals with torn data (ROI mode)")
+
+        # Set up for pedestals
+        self.mean = {}
+        self.variance = {}
+
+        # Gotta do it manually
+        for chan_id in self.chan_list:
+            caps = [ [] for x in range(0, len(samples[0].channels[chan_id])) ]
+            self.mean[chan_id] = []
+            self.variance[chan_id] = []
+
+            for evt in samples:
+                for capacitor, ampl in enumerate(evt.channels[chan_id]):
+                    if not ampl is None:
+                        caps[capacitor].append(ampl)
+
+            # Now we have it in filtered capacitor form
+            nan = float('nan')
+            for cap in caps:
+                # Cap is a list
+                N = len(cap)
+                if N == 0:
+                    self.mean[chan_id].append(nan)
+                    self.variance[chan_id].append(nan)
+                elif N == 1:
+                    self.mean[chan_id].append(cap)
+                    self.variance[chan_id].append(nan)
+                else:
+                    bs, bs, mean, variance, *bs = describe(cap)
+
+                    # Because the numpy method returns some ass-retarded type
+                    self.mean[chan_id].append(float(mean))
+                    self.variance[chan_id].append(float(variance))
+
+        # Remove the samples because python can't pickle it
+        del(self.chan_list)
+
+    #
+    # Return a pedestal subtracted list of amplitudes
+    #
+    def subtract(self, amplitudes, chan_id):
+        length = len(self.mean[chan_id])
+        for i in range(length):
+            amplitudes[i] -= self.mean[chan_id][i]
+
+    #
+    # Generate a test pedestal, with normally distributed event samples
+    #
+    def generatePedestal(resolution, chan_list, numsamples, scale):
+
+        import random
+
+        # Compute the maximum value pedestal in any channel for this set of events.
+        # Since this is for pedestals, we don't want the channel useless
+        # (a pedestal near saturation is useless)
+        #
+        # We set pedestals' offsets to be, at most 1/8 of the channel's dynamic range
+        maxy = 1 << ((1 << resolution) - 3) - 1
+
+        # Generate some random offsets
+        base_amplitudes = {}
+        for chan_id in chan_list:
+            base_amplitudes[chan_id] = [random.randrange(maxy) for i in range(0, numsamples)]
+
+        ampl_list = []
+        for chan_id, base in base_amplitudes.items():
+
+            # Make some new fluxes
+            flux = stats.norm.rvs(size=numsamples, scale=scale)
+
+            # Apply them to the base amplitudes
+            ampl_list.append([math.floor( base[i] + flux[i]*base[i] ) for i in range(0, numsamples)])
+
+        # Make a (zero-offsets) event that has these features
+        # Amplitude list for generateEvent() needs to be order preserving, or else the zip() will get the orders
+        # screwed up
+
+        #            print("Pedestal: %d channels, with %d samples each @ %d-bit" % (len(chan_list), numsamples, 1 << resolution), file=sys.stderr)
+        return lappd.event.generateEvent(555, resolution, chan_list, [0]*len(chan_list), ampl_list)
+
+
 # Define an event class
 class event(object):
 
@@ -273,117 +384,6 @@ class event(object):
                   
         def completed(self):
             return self.receivedBytes == self.targetLength
-
-    #
-    # Utility class to compute pedestals from a list of events
-    #
-    class pedestal(object):
-
-        def __init__(self, samples):
-
-            # Now compute the pedestals
-            from scipy.stats import describe
-            
-            # Did we receive any samples?
-            if not len(samples):
-                raise Exception("Did not receive any samples!")
-        
-            # Some board information
-            self.board_id = samples[0].board_id
-
-            # Use the first event to determine the list of channels
-            self.chan_list = samples[0].channels.keys()
-
-            # Sanity checks on the pedestal samples
-            for sample in samples:
-            
-                if not isinstance(sample, event):
-                    raise Exception("Encountered non-event in list of samples.  Nonsense.")
-            
-                if not self.chan_list == sample.channels.keys():
-                    raise Exception("Provided sample events for pedestaling have inhomogeneous channel content.  This .... is ... U N A C C E P T A B L E E E E ---- U N A C C E P T A B L E E E E E E E")
-                if not sample.keep_offset:
-                    raise Exception("Refusing to build pedestals with torn data (ROI mode)")
-            
-            # Set up for pedestals
-            self.mean = {}
-            self.variance = {}
-
-            # Gotta do it manually
-            for chan_id in self.chan_list:
-                caps = [ [] for x in range(0, len(samples[0].channels[chan_id])) ]
-                self.mean[chan_id] = []
-                self.variance[chan_id] = []
-                
-                for evt in samples:
-                    for capacitor, ampl in enumerate(evt.channels[chan_id]):
-                        if not ampl is None:
-                            caps[capacitor].append(ampl)
-
-                # Now we have it in filtered capacitor form
-                nan = float('nan')
-                for cap in caps:
-                    # Cap is a list
-                    N = len(cap)
-                    if N == 0:
-                        self.mean[chan_id].append(nan)
-                        self.variance[chan_id].append(nan)
-                    elif N == 1:
-                        self.mean[chan_id].append(cap)
-                        self.variance[chan_id].append(nan)
-                    else:
-                        bs, bs, mean, variance, *bs = describe(cap)
-
-                        # Because the numpy method returns some ass-retarded type
-                        self.mean[chan_id].append(float(mean))
-                        self.variance[chan_id].append(float(variance))
-                    
-            # Remove the samples because python can't pickle it
-            del(self.chan_list)
-
-        #
-        # Return a pedestal subtracted list of amplitudes
-        #
-        def subtract(self, amplitudes, chan_id):
-            length = len(self.mean[chan_id])
-            for i in range(length):
-                amplitudes[i] -= self.mean[chan_id][i]
-            
-        #
-        # Generate a test pedestal, with normally distributed event samples
-        #
-        def generatePedestal(resolution, chan_list, numsamples, scale):
-
-            import random
-
-            # Compute the maximum value pedestal in any channel for this set of events.
-            # Since this is for pedestals, we don't want the channel useless
-            # (a pedestal near saturation is useless)
-            #
-            # We set pedestals' offsets to be, at most 1/8 of the channel's dynamic range
-            maxy = 1 << ((1 << resolution) - 3) - 1
-
-            # Generate some random offsets
-            base_amplitudes = {}
-            for chan_id in chan_list:
-                base_amplitudes[chan_id] = [random.randrange(maxy) for i in range(0, numsamples)]
-
-            ampl_list = []
-            for chan_id, base in base_amplitudes.items():
-
-                # Make some new fluxes
-                flux = stats.norm.rvs(size=numsamples, scale=scale)
-
-                # Apply them to the base amplitudes
-                ampl_list.append([math.floor( base[i] + flux[i]*base[i] ) for i in range(0, numsamples)])
-
-            # Make a (zero-offsets) event that has these features
-            # Amplitude list for generateEvent() needs to be order preserving, or else the zip() will get the orders
-            # screwed up
-
-            #            print("Pedestal: %d channels, with %d samples each @ %d-bit" % (len(chan_list), numsamples, 1 << resolution), file=sys.stderr)
-            return lappd.event.generateEvent(555, resolution, chan_list, [0]*len(chan_list), ampl_list)
-
         
     #
     # This generates hits, for testing
@@ -873,12 +873,13 @@ def export(anevent, eventQueue, dumpFile):
         # Push it to another process?
         if dumpFile:
             pickle.dump(anevent, dumpFile)
-            eventQueue.put(anevent.evt_number, block=False)
+            # eventQueue.put(anevent.evt_number, block=False)
         else:
             # There's always a queue for controlling the processes
             anevent.prequeue = time.time()
             eventQueue.put(anevent, block=False)
-            
+
+        
     except queue.Full as e:
         print(e)
     
@@ -890,6 +891,10 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     if args.subtract:
         activePedestal = pickle.load(open(args.subtract, "rb"))
         print("Using pedestal file %s" % args.subtract, file=sys.stderr)
+
+    # Usually, we only intake a certain number of events
+    maxEvents = math.floor(args.N/args.threads)
+    print("Listening for %d events..." % maxEvents, file=sys.stderr)
     
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -919,7 +924,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     # Server loop
     print("Entering service loop", file=sys.stderr)
     
-    while True:
+    while maxEvents > 0:
 
         try:
             # Grab the maximum IP packet size
@@ -974,6 +979,9 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
 
                         # Did we complete one?
                         if currentEvents[tag].complete:
+
+                            # Track that we just shipped one
+                            maxEvents -= 1
                             export(currentEvents[tag], eventQueue, args.file)
                             del(currentEvents[tag])
                             numCurrentEvents -= 1
@@ -1031,6 +1039,9 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                             # Now, this event might have been completed by a bunch of orhpans
                             if currentEvents[tag].complete:
                                 #print("Orphans completed an event, pushing...", file=sys.stderr)
+
+                                # Track that we are about to ship one
+                                maxEvents -= 1
                                 export(currentEvents[tag], eventQueue, args.file)
 
                                 # Remove it from the list
@@ -1070,7 +1081,14 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
             break
 
-               
+    print("Remaining number of events: %d" % maxEvents, file=sys.stderr)
+    
+    # If we had a dump file, close it out
+    if args.file:
+        print("\nClosing dump..", file=sys.stderr)
+        args.file.close()
+
+
 #
 # Utility function to dump a pedestal subtracted event
 #

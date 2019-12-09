@@ -126,39 +126,45 @@ for i in range(0, args.N):
     if not args.external:
         # Suppress board readback and response!
         ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
-    
+
+        # Notify that a trigger was sent
+        print("Trigger %d sent..." % i, file=sys.stderr)
+        
         # Sleep for the specified delay
         time.sleep(args.i)
 
-    # Get from event queue
-    try:
-        event = eventQueue.get()
+    # Get from event queue if we're not directly dumping to files
+    if not args.file:
+        try:
+            event = eventQueue.get()
 
-        if isinstance(event, int):
-            print("Event %d processed" % event, file=sys.stderr)
-        else:
             print("Received event %d" % (event.evt_number), file=sys.stderr)
             # Push it onto the processing queue
             events.append(event)
 
-        # Signal that we consumed something
-        eventQueue.task_done()
+            # Signal that we consumed something
+            eventQueue.task_done()
         
-    except queue.Empty:
-        print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
+        except queue.Empty:
+            print("Timed out (+100ms) on soft trigger %d." % i, file=sys.stderr)
+
+# Wait on the intake processes to finish
+print("Waiting for intakes() to finish...", file=sys.stderr)
+[p.join() for p in intakeProcesses]
+print("intakes() complete!", file=sys.stderr)
 
 # Turn off the extenal trigger if we turned it on
 if triggerToggled:
     ifc.brd.pokenow(0x370, triggerToggled & ~(1 << 5))
 
 # We're finished, so clean up the listeners
-lappdTool.reap(intakeProcesses)
+# lappdTool.reap(intakeProcesses)
 
 # Should we build a pedestal with these events?
 if args.pedestal:
 
     # BEETLEJUICE BEETLEJUICE BEETLEJUICE
-    activePedestal = event.pedestal(events)
+    activePedestal = lappdProtocol.pedestal(events)
 
     # Write it out
     if len(events) > 0:
