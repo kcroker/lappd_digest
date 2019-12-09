@@ -222,7 +222,8 @@ class pedestal(object):
 
         # Now compute the pedestals
         from scipy.stats import describe
-
+        from numpy import floor
+        
         # Did we receive any samples?
         if not len(samples):
             raise Exception("Did not receive any samples!")
@@ -260,21 +261,28 @@ class pedestal(object):
                         caps[capacitor].append(ampl)
 
             # Now we have it in filtered capacitor form
-            nan = float('nan')
             for cap in caps:
                 # Cap is a list
                 N = len(cap)
                 if N == 0:
-                    self.mean[chan_id].append(nan)
-                    self.variance[chan_id].append(nan)
+                    self.mean[chan_id].append(None)
+                    self.variance[chan_id].append(None)
                 elif N == 1:
                     self.mean[chan_id].append(cap)
-                    self.variance[chan_id].append(nan)
+                    self.variance[chan_id].append(None)
                 else:
                     bs, bs, mean, variance, *bs = describe(cap)
 
+                    #
                     # Because the numpy method returns some ass-retarded type
-                    self.mean[chan_id].append(float(mean))
+                    #
+                    # Note that we save the mean as an integer.
+                    # This lets us do integer subtraction without conversion when removing pedestals
+                    # directly from the data as it comes in.
+                    #
+                    # Since noise is a least 30 ADC counts, this changes nothing.
+                    #
+                    self.mean[chan_id].append(round(float(mean)))
                     self.variance[chan_id].append(float(variance))
 
         # Remove the samples because python can't pickle it
