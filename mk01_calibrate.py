@@ -145,7 +145,9 @@ for i in range(0, args.N):
         try:
             event = eventQueue.get()
 
-            print("Received event %d" % (event.evt_number), file=sys.stderr)
+            if (event.evt_number & 255) == 0:
+                print("Received event %d" % (event.evt_number), file=sys.stderr)
+                
             # Push it onto the processing queue
             events.append(event)
 
