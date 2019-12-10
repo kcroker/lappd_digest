@@ -1,7 +1,7 @@
 ## Initializing and taking pedestals
 
 ```
-./mk01_calibrate.py -Ipq -w 14 -c "12, 13, 14, 15, 48, 55" 10.0.6.212 1000
+./mk01_calibrate.py -Ipq -w 14 -c "12 13 14 15 48 55" 10.0.6.212 1000
 ```
 
 This will initialize (`-I`) the board at 10.0.6.212, enable channels (`-c`) 12-15, 48, and 55, set a delay of 14 units between trigger and stopping sampling (`-w`), and build a pedestal (`-p`) with 1000 samples.  It will do so quietly (`-q`): no ASCII dumps of waveforms to stdout.
@@ -10,7 +10,7 @@ The produced pedestal file will be `<boardhex>.pedestal`.
 ## Getting pedestal subtracted data (no timing calibration)
 
 ```
-./mk01_calibrate.py -e -s 248e5610485c.pedestal -c "12, 14" 10.0.6.212 10000 > pulses_DDMMYYYY
+./mk01_calibrate.py -e -s 248e5610485c.pedestal -c "12 14" 10.0.6.212 10000 > pulses_DDMMYYYY
 ```
 
 This will capture 10k hardware-triggered events (`-e`) from channels 12 and 14 of the board at 10.0.6.212, subtracting (`-s`) the given pedestal file, and dumping the ASCII of all these waveforms to `pulses_DDMMYYYY`.
@@ -18,7 +18,7 @@ This will capture 10k hardware-triggered events (`-e`) from channels 12 and 14 o
 ## Getting noise curves (capacitor ordering, masking)
 
 ```
-./mk01_calibrate -o -m 100 -s 248e5610485c.pedestal -c "12, 14" 10.0.6.212 10 > noise_DDMMYYYY
+./mk01_calibrate -o -m 100 -s 248e5610485c.pedestal -c "12 14" 10.0.6.212 10 > noise_DDMMYYYY
 ```
 
 Assuming you've not connected anything to the board, this will take noise traces.
