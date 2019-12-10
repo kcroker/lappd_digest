@@ -11,6 +11,7 @@ import pickle
 import queue
 import time
 import collections
+from os import getpid
 
 # Define the format of a hit packet
 #  HIT_MAGIC (16 bits) (2 bytes)
@@ -918,22 +919,25 @@ def export(anevent, eventQueue, dumpFile):
 # Multiprocess fork() entry point
 def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, subtract=None):
 
+    # Who are we?
+    pid = getpid()
+    
     # If we pedestalling, load the pedestal
     activePedestal = None
     if args.subtract:
         activePedestal = pickle.load(open(args.subtract, "rb"))
-        print("Using pedestal file %s" % args.subtract, file=sys.stderr)
+        print("(PID %d): Using pedestal file %s" % (pid, args.subtract), file=sys.stderr)
 
     # If we are doing on the fly timing corrections
     # load the timing file
     activeTiming = None
     if args.timing:
         activeTiming = pickle.load(open(args.timing, "rb"))
-        print("Using timing file %s" % args.timing, file=sys.stderr)
+        print("(PID %d): Using timing file %s" % (pid, args.timing), file=sys.stderr)
         
     # Usually, we only intake a certain number of events
     maxEvents = math.floor(args.N/args.threads)
-    print("Listening for %d events..." % maxEvents, file=sys.stderr)
+    print("(PID %d): Listening for %d total events..." % (pid, maxEvents), file=sys.stderr)
     
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -952,7 +956,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         args.file = open("%s_%d" % (args.file, listen_tuple[1]), "wb")
         
     # Release the semaphore lock
-    print("Releasing initialization lock for port %d..." % listen_tuple[1], file=sys.stderr)
+    print("(PID %d): Releasing initialization lock for port %d..." % (pid, listen_tuple[1]), file=sys.stderr)
     msg = Exception()
     msg.port = listen_tuple[1]
     eventQueue.put(msg)
@@ -961,7 +965,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     eventQueue.join()
 
     # Server loop
-    print("Entering service loop", file=sys.stderr)
+    print("(PID %d): Entering service loop" % pid, file=sys.stderr)
     
     while maxEvents > 0:
 
@@ -1022,6 +1026,9 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                             # Track that we just shipped one
                             maxEvents -= 1
                             export(currentEvents[tag], eventQueue, args.file)
+                            if (maxEvents & 255) == 0:
+                                print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
+            
                             del(currentEvents[tag])
                             numCurrentEvents -= 1
                             
@@ -1041,7 +1048,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                 try:
                     packet = eventpacker.unpack(data)
                     if not packet['magic'] == EVT_MAGIC:
-                        print("Received packet could not be parsed as either an event packet or a hit packet.  Dropping.", file=sys.stderr)
+                        print("(PID %d): Received packet could not be parsed as either an event packet or a hit packet.  Dropping." % pid, file=sys.stderr)
                         print(packet, file=sys.stderr)
                         continue
                     else:
@@ -1084,16 +1091,19 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                                 maxEvents -= 1
                                 export(currentEvents[tag], eventQueue, args.file)
 
+                                if (maxEvents & 255) == 0:
+                                    print("Waiting for %d more events" % maxEvents, file=sys.stderr)
+            
                                 # Remove it from the list
                                 del(currentEvents[tag])
                                 numCurrentEvents -= 1
                                 
                         else:
-                            print("Received a duplicate event (well, sequence numbers might have been different but source and low timestamp collided)")
+                            print("(PID %d): Received a duplicate event (well, sequence numbers might have been different but source and low timestamp collided)" % pid, file=sys.stderr)
                             
                 
                 except bitstruct.Error as e:
-                    print("Received packet could not be parsed as either an event packet or a hit packet.  Dropping.", file=sys.stderr)
+                    print("(PID %d): Received packet could not be parsed as either an event packet or a hit packet.  Dropping." % pid, file=sys.stderr)
                     continue
                 except Exception as e:
                     # This is something more serious...
@@ -1105,15 +1115,16 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
             # print(packet, file=sys.stderr)
 
         except KeyboardInterrupt:
-            print("\nCaught SIGINT.", file=sys.stderr)
+            print("\n(PID %d): Caught SIGINT." % pid, file=sys.stderr)
 
             # If there was a dumpFile, close it
             if args.file:
-                print("\nClosing dump..", file=sys.stderr)
+                print("\n(PID %d): Closing dump.." % pid, file=sys.stderr)
                 args.file.close()
             
-            print("At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (len(orphanedHits), len(currentEvents)), file=sys.stderr)
-            
+            print("(PID %d): At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (pid, len(orphanedHits), len(currentEvents)), file=sys.stderr)
+            print("(PID %d): Remaining number of events: %d" % (pid, maxEvents), file=sys.stderr)
+
             # Permit death without pushing further data onto the pipe
             eventQueue.cancel_join_thread()
             break
@@ -1121,12 +1132,11 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
             print("\nCaught some sort of instruction to die with honor, committing 切腹...", file=sys.stderr)
             break
 
-    print("Remaining number of events: %d" % maxEvents, file=sys.stderr)
     
     # If we had a dump file, close it out
     if args.file:
-        print("\nClosing dump..", file=sys.stderr)
         args.file.close()
+        print("\n(PID %d): Dump file closed." % pid, file=sys.stderr)
 
 
 #

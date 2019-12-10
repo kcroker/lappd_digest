@@ -55,9 +55,17 @@ if args.external:
     args.i = 0
 
 # If we gave a timing file, retain capacitor offsets in the packet-catcher
+# (we calibrte them right before shipping completed events)
 if args.timing:
     args.offset = True
-    
+
+# If binary files have been requested, if there are no calibrations
+# force capacitor ordering
+if args.file:
+    if not args.subtract and not args.timing and not args.gain:
+        print("Forcing capacitor ordering on binary output...", file=sys.stderr)
+        args.offset = True
+        
 # Record a bunch of registers first
 # (Abhorrent magic numbers...)
 
@@ -127,7 +135,7 @@ for i in range(0, args.N):
         ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
 
         # Notify that a trigger was sent
-        print("Trigger %d sent..." % i, file=sys.stderr)
+        # print("Trigger %d sent..." % i, file=sys.stderr)
         
         # Sleep for the specified delay
         time.sleep(args.i)
@@ -150,7 +158,7 @@ for i in range(0, args.N):
 # Wait on the intake processes to finish
 print("Waiting for intakes() to finish...", file=sys.stderr)
 [p.join() for p in intakeProcesses]
-print("intakes() complete!", file=sys.stderr)
+print("intakes() complete.", file=sys.stderr)
 
 # Turn off the extenal trigger if we turned it on
 if triggerToggled:
@@ -170,29 +178,7 @@ if args.pedestal:
         pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
 
 elif not args.quiet:
-
-    # We are not building pedestals, so we probably want to apply calibrations
-    # and see what we get
-    #if args.gain:
-    #    gainCalibration = pickle.load(open(args.gain, "rb"))
         
-    # Should be a flag for precision adjustment, or very rapidly adjust by the average
-    chans = events[0].channels.keys()
-
     for evt in events:
-        
-        # Apply the gain calibration (precisely, slowly...)
-        #
-        # (if the are tuples because timing was applied, this won't work)
-        #if args.gain:
-        #    for chan in chans:
-        #        for i in range(1024):
-        #            if evt.channels[chan][i] is None:
-        #                continue
-        #            evt.channels[chan][i] *= gainCalibration[15 if chan < 16 else 55][i][0]
-
         # Output the result
         lappdProtocol.dump(evt)
-
-        # Debug
-        print("Processed event %d" % evt.evt_number, file=sys.stderr)

@@ -52,6 +52,42 @@ This requires a pedestal file.
 This will determine the temporal differences between adjacent capacitors in the delay lines, using calibration channels.
 The pedestal (`-s`) is mandatory, and the gain correction (`-g`) is suggested.
 
+## Taking data at maximal speed (for offline analysis)
+
+This is accomplished via hardware triggers and listening on multiple ports with multiple processes.
+
+```
+./mk01_calibrate.py -e -c "15 55 14 48" -T 3 -f fancyrun 10.0.6.212 50000
+```
+
+This will record 50k events on 3 separate processes (`-T`) and write them to binary files with the prefix `fancyrun_`.
+
+## Performing offline analysis on binary data
+
+Offline analysis on binary data can also proceed in parallel.
+To remove only pedestals,
+
+```
+./apply_calibration.py -s 248e5610485c.pedestal fancyrun* -T 3 
+```
+
+Notice the file globbing, so we are giving it all binary dump files made during the fancyrun.
+To remove pedestals and perform timing,
+
+```
+./apply_calibration.py -s 248e5610485c.pedestal -t 248e5610485c.timing fancyrun* -T 3 
+```
+
+To dump a binary run to ASCII, use the `-d` flag
+
+```
+./apply_calibration.py calibrated_fancyrun_<timestamp>_<port> -d > ascii_dump 
+```
+
+Note that only one thread can (sensibly) write to stdout at a time, so dumping to ASCII cannot be run in parallel.
+Dumping can be used for data at any level of calibration: uncalibrated, pedestal subtracted, timed, etc.
+(Gain subtraction is also supported, but A21 does not have comprehensive gain measurements yet.)
+
 ## Notes
 1. Software trigger rate is, by default, 1kHz.
 2. The default operating DAC voltages values here are always reset at any tool run, and can be read from the comment headers of ./mk01_calibrate output
