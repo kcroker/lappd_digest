@@ -1,0 +1,14 @@
+#!/bin/bash
+
+# Initialize
+./mk01_calibrate.py -Ipq 10.0.6.212 -c "$*" 1000
+
+# Get a date
+datestr=`date +%H:%M:%S`
+
+# Characterize
+./describe_pedestal.py 24*.pedestal > "pedstats_$datestr"
+
+# Graph
+
+echo "plot for [i in '$*'] 'pedstats_$datestr' using 1:(\$4 == i ? sqrt(\$3)/51173 : 1/0) w l lw 2 t sprintf('Channel %s', i)" | gnuplot -p 

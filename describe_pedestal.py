@@ -20,7 +20,13 @@ for chan in aPedestal.mean:
     
     for mean, var in zip(aPedestal.mean[chan], aPedestal.variance[chan]):
         #print(mean, var)
-    
+
+        if mean is None:
+            mean = float('nan')
+
+        if var is None:
+            var = float('nan')
+            
         print("%d %e %e %d" % (n, mean, var, chan))
         n += 1
 

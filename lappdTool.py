@@ -30,7 +30,7 @@ def create(leader):
     parser.add_argument('-e', '--external', action="store_true", help='Enable hardware triggering and do not send software triggers.')
     parser.add_argument('-f', '--file', metavar='FILE_PREFIX', help='Do not pass events via IPC.  Immediately dump binary to files named with this prefix.')
     parser.add_argument('-m', '--mask', metavar='MASK_STOP', help='Mask out this number of channels the time-ordered left of the final sample', type=int, default=0, choices=range(0,1024))
-    parser.add_argument('-c', '--channels', metavar='CHANNELS', help="Comma separated string of channels. (Persistent)")
+    parser.add_argument('-c', '--channels', metavar='CHANNELS', help="Space separated string of channels. (Persistent)")
 
     parser.add_argument('-w', '--wait', metavar='WAIT', type=int, help="Adjust delay between receipt of soft/hard trigger and sampling stop. (Persistant)")
     parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
@@ -101,7 +101,7 @@ def connect(parser):
 
     # Set the channels?
     if args.channels:
-        chans = list(map(int, args.channels.split(',')))
+        chans = list(map(int, args.channels.split()))
         print("Specifying channels: ", chans, file=stderr)
 
         high = 0
