@@ -194,4 +194,4 @@ def reap(intakeProcesses, args):
     
     for proc in intakeProcesses:
         kill(proc.pid, SIGINT)
-        proc.join()
+        # proc.join()

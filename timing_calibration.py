@@ -28,6 +28,12 @@ if not args.subtract:
 # Force capacitor ordering
 args.offset = True
 
+# Save the number of samples we demand
+Nsamples = args.N
+
+# Set args.N = 0, so we keep listening indefinitely
+args.N = 0
+
 # This is the fork() point, so it needs to be inside the
 # script called.
 if __name__ == "__main__":
@@ -46,11 +52,36 @@ maskhigh = ifc.brd.peeknow(0x674)
 ifc.brd.pokenow(0x670, 0x00008000)
 ifc.brd.pokenow(0x674, 0x00800000)
 
-# Define an event list
-evts = []
+# Load the gain correction?
+gainCorrection = None
+if args.gain:
+    import pickle
+    gainCorrection = pickle.load(open(args.gain, "rb"))
+    print("Using gain file %s" % args.gain, file=sys.stderr)
 
-# Set the number of samples in each sweep
-for i in range(0, args.N):
+# Get an event
+ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
+
+# Wait for the event
+evt = eventQueue.get()
+
+# Get board id
+board_id = evt.board_id.hex()
+
+# Get board active channels
+chans = evt.channels.keys()
+
+# Make the nishimura romero-wolf variables
+xij = {}
+yij = {}
+
+for chan in chans:
+    # Initialize the pairs list
+    xij[chan] = [0 for x in range(1024)]
+    yij[chan] = [0 for y in range(1024)]
+
+# Now populate them
+for k in range(0, Nsamples):
 
     # Wait for it to settle
     time.sleep(args.i)
@@ -60,12 +91,41 @@ for i in range(0, args.N):
 
     # Wait for the event
     evt = eventQueue.get()
-    print("Received event %d" % i, file=sys.stderr)
+
+    # Modestly print out status
+    if k & 255 == 0:
+        print("Received event %d" % k, file=sys.stderr)
+
+    # Process it right here.
+    for chan in chans:
+        # First, apply the gain correction (since we don't usually care enough about this elsewhere)
+        if gainCorrection:
+            for i in range(1024):
+                if not evt.channels[chan][i] is None:
+                    evt.channels[chan][i] *= gainCorrection[chan][i][0]
+            #print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
+        
+        # Go through the waveforms, stashing the squares already
+
+        for i in range(1023):
+            if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
+                #xij[chan][i].append( (evt.channels[chan][i] + evt.channels[chan][i+1])**2 )
+                xij[chan][i] += (evt.channels[chan][i] + evt.channels[chan][i+1])**2
+                #yij[chan][i].append( (evt.channels[chan][i] - evt.channels[chan][i+1])**2 )
+                yij[chan][i] += (evt.channels[chan][i] - evt.channels[chan][i+1])**2
+            
+            # Don't forget the reach around
+            if not evt.channels[chan][1023] is None and not evt.channels[chan][0] is None:
+                #xij[chan][1023].append( (evt.channels[chan][1023] + evt.channels[chan][0])**2 )
+                xij[chan][1023] += (evt.channels[chan][1023] + evt.channels[chan][0])**2
+                #yij[chan][1023].append( (evt.channels[chan][1023] - evt.channels[chan][0])**2 )
+                yij[chan][1023] += (evt.channels[chan][1023] - evt.channels[chan][0])**2
+
     
     # Add some info and stash it
-    evts.append(evt)
+    # evts.append(evt)
 
-    # Signal that we got it?
+    # Signal that we got it.
     eventQueue.task_done()
 
 # Restore old channel masks
@@ -83,63 +143,19 @@ lappdTool.reap(intakeProcesses, args)
 ############# END COMMON TOOL FOOTER 
 
 # Now do the analysis
-from scipy.stats import describe
+# from scipy.stats import describe
 import math
-
-# Load the gain correction?
-gainCorrection = None
-if args.gain:
-    import pickle
-    gainCorrection = pickle.load(open(args.gain, "rb"))
-    print("Using gain file %s" % args.gain, file=sys.stderr)
     
-# Now perform the timing calibration
-chans = evts[0].channels.keys()
-
-# Use notation consistent with Nishimura & Romero-Wolf
-xij = {}
-yij = {}
-
-# Set this up to do arbitrary steps
-step = 2
-starts = [0,1]
-
 for chan in chans:
-
-    # Initialize the pairs list
-    xij[chan] = [[] for x in range(1024)]
-    yij[chan] = [[] for y in range(1024)]
-
-    # Now go through the events
-    for evt in evts:
-
-        # First, apply the gain correction (since we don't usually care enough about this elsewhere)
-        if gainCorrection:
-            for i in range(1024):
-                if not evt.channels[chan][i] is None:
-                    evt.channels[chan][i] *= gainCorrection[chan][i][0]
-            print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
-        
-        # Go through the waveforms, stashing the squares already
-        for i in range(1023):
-            if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
-                xij[chan][i].append( (evt.channels[chan][i] + evt.channels[chan][i+1])**2 )
-                yij[chan][i].append( (evt.channels[chan][i] - evt.channels[chan][i+1])**2 )
-
-        # Don't forget the reach around
-        if not evt.channels[chan][1023] is None and not evt.channels[chan][0] is None:
-            xij[chan][1023].append( (evt.channels[chan][1023] + evt.channels[chan][0])**2 )
-            yij[chan][1023].append( (evt.channels[chan][1023] - evt.channels[chan][0])**2 )
-
     # Okay, now compute the averages
     for i in range(1024):
 
         # This function, computing 4 moments, is faster than just computing
         # the damn average manually...
         #
-        # XXX changed this from these numpy.float64's to regular python float...
-        xij[chan][i] = float(describe(xij[chan][i]).mean)
-        yij[chan][i] = float(describe(yij[chan][i]).mean)
+        # XXX changed this from these numpy.float644's to regular python float...
+        xij[chan][i] = float(xij[chan][i]/Nsamples) #float(describe(xij[chan][i]).mean)
+        yij[chan][i] = float(yij[chan][i]/Nsamples) #float(describe(yij[chan][i]).mean)
 
         #
         # Assuming the integral average is a good approximation for this sample...
@@ -175,4 +191,4 @@ for i in range(55-8, 56):
 
 # Write out a binary timing file
 import pickle
-pickle.dump(lappdProtocol.timing(chanmap, xij, reference, deltat_chip), open("%s.timing" % evts[0].board_id.hex(), "wb"))
+pickle.dump(lappdProtocol.timing(chanmap, xij, reference, deltat_chip), open("%s.timing" % board_id, "wb"))
