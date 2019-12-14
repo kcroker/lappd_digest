@@ -78,7 +78,7 @@ ifc.RegSetBit(lappdIfc.MODE, lappdIfc.C_MODE_TCA_ENA_BIT, 0)
 ############# BEGIN COMMON TOOL FOOTER
 
 # Reap listeners
-lappdTool.reap(intakeProcesses)
+lappdTool.reap(intakeProcesses, args)
 
 ############# END COMMON TOOL FOOTER 
 

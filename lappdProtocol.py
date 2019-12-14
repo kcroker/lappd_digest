@@ -937,7 +937,11 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         
     # Usually, we only intake a certain number of events
     maxEvents = math.floor(args.N/args.threads)
-    print("(PID %d): Listening for %d total events..." % (pid, maxEvents), file=sys.stderr)
+    if not maxEvents:
+        print("(PID %d): Listening until terminated..." % pid, file=sys.stderr)
+        maxEvents = -1
+    else:
+        print("(PID %d): Listening for %d total events..." % (pid, maxEvents), file=sys.stderr)
     
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -967,7 +971,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     # Server loop
     print("(PID %d): Entering service loop" % pid, file=sys.stderr)
     
-    while maxEvents > 0:
+    while not maxEvents == 0:
 
         try:
             # Grab the maximum IP packet size
@@ -1138,7 +1142,8 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         args.file.close()
         print("\n(PID %d): Dump file closed." % pid, file=sys.stderr)
 
-
+    # Wait for the parent to join
+    #eventQueue.close()
 #
 # Utility function to dump a pedestal subtracted event
 #

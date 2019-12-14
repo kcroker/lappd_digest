@@ -24,6 +24,11 @@ ifc, args, eventQueue = lappdTool.connect(parser)
 # Force capacitor offsetting
 args.offset = True
 
+# Since the scripts now only listen for N/threads events
+# we need to use 2N since we want 2N
+samples = args.N
+args.N = 0
+
 # This is the fork() point, so it needs to be inside the
 # script called.
 if __name__ == "__main__":
@@ -42,8 +47,12 @@ for voltage in (args.low, args.high):
     ifc.DacSetVout(lappdTool.DAC_TCAL_N1, voltage)
     ifc.DacSetVout(lappdTool.DAC_TCAL_N2, voltage)
 
+    # Give some output
+    print("Receiving data for TCAL_N = %f" % voltage, file=sys.stderr)
+
+    k = samples
     # Take N samples at both low and high
-    for k in range(0, args.N):
+    while k > 0:
         # Wait for it to settle
         time.sleep(args.i)
 
@@ -51,15 +60,18 @@ for voltage in (args.low, args.high):
         ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
 
         # Wait for the event
-        evt = eventQueue.get()
-            
+        try:
+            evt = eventQueue.get(timeout=args.i)
+        except:
+            print("Timed out...", file=sys.stderr)
+            continue
+        
         # Add some info and stash it
         evt.voltage = voltage
         evts.append(evt)
-
-        # Give some output
-        print("Received data for TCAL_N = %f" % voltage, file=sys.stderr)
-
+        k -= 1
+        
+        
 ############# BEGIN COMMON TOOL FOOTER
 
 # Once we have all the events we need, go ahead and reap the listeners.
@@ -67,7 +79,7 @@ for voltage in (args.low, args.high):
 # and choke out.
 
 # Reap listeners
-lappdTool.reap(intakeProcesses)
+lappdTool.reap(intakeProcesses, args)
 
 ############# END COMMON TOOL FOOTER 
 
@@ -123,7 +135,7 @@ for chan in chans:
         varhigh = caps_high[chan][cap].variance
         varlow = caps_low[chan][cap].variance
 
-        ampl_variance = math.sqrt(caps_high[chan][cap].variance + caps_low[chan][cap].variance)/(run*math.sqrt(args.N))
+        ampl_variance = math.sqrt(caps_high[chan][cap].variance + caps_low[chan][cap].variance)/(run*math.sqrt(samples))
         recip_k = run/(caps_high[chan][cap].mean - caps_low[chan][cap].mean)
         
         # We want recriprocal slopes

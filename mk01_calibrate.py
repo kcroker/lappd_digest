@@ -120,10 +120,6 @@ if __name__ == '__main__':
 
 # Turn on the external trigger, if it was requested and its off
 triggerToggled = False
-if args.external:
-    triggerToggled = ifc.brd.peeknow(0x370)
-    if not (triggerToggled & 1 << 5):
-        ifc.brd.pokenow(0x370, triggerToggled | (1 << 5))
         
 events = []
 import time
@@ -159,15 +155,14 @@ for i in range(0, args.N):
 
 # Wait on the intake processes to finish
 print("Waiting for intakes() to finish...", file=sys.stderr)
-[p.join() for p in intakeProcesses]
+for p in intakeProcesses:
+    p.join()
+
+#eventQueue.close()
 print("intakes() complete.", file=sys.stderr)
 
-# Turn off the extenal trigger if we turned it on
-if triggerToggled:
-    ifc.brd.pokenow(0x370, triggerToggled & ~(1 << 5))
-
 # We're finished, so clean up the listeners
-# lappdTool.reap(intakeProcesses)
+# lappdTool.reap(intakeProcesses, args)
 
 # Should we build a pedestal with these events?
 if args.pedestal:

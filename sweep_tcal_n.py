@@ -122,6 +122,6 @@ else:
 ############# BEGIN COMMON TOOL FOOTER
 
 # Reap listeners
-lappdTool.reap(intakeProcesses)
+lappdTool.reap(intakeProcesses, args)
 
 ############# END COMMON TOOL FOOTER 
