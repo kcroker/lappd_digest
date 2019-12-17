@@ -54,11 +54,6 @@ if args.pedestal:
 if args.external:
     args.i = 0
 
-# If we gave a timing file, retain capacitor offsets in the packet-catcher
-# (we calibrte them right before shipping completed events)
-if args.timing:
-    args.offset = True
-
 # If binary files have been requested, if there are no calibrations
 # force capacitor ordering
 if args.file:

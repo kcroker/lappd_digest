@@ -87,10 +87,10 @@ C_MODE_DRS_REVRS_BIT    = 6  # reverse order of Drs stop samples
 
 
 class lappdInterface :
-    def __init__(self, ip = '10.0.6.193', udpsport = 8989):
+    def __init__(self, ip = '10.0.6.193'):
         self.xx = 0
         # self.brd = eevee.board('10.0.6.212', udpsport = 7778)
-        self.brd = eevee.board(ip, udpsport = udpsport) 
+        self.brd = eevee.board(ip) 
         self.peds = [0]*1024
         self.rmss = [0]*1024
         self.AdcSampleOffset = 12

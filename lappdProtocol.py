@@ -191,7 +191,9 @@ class timing(object):
         for chan in event.channels.keys():
 
             # Define the tare (shift left, not right)
-            tare = 1024 - self.shift[event.offsets[chan]]
+            #tare = 1024 - self.shift[event.offsets[chan]]
+            #tare = self.shift[event.offsets[chan]]
+            tare = event.offsets[chan]
 
             # HACKY because, in principle, the protocol supports different
             # numbers of channels on each 
@@ -912,7 +914,6 @@ def export(anevent, eventQueue, dumpFile):
             anevent.prequeue = time.time()
             eventQueue.put(anevent, block=False)
 
-        
     except queue.Full as e:
         print(e)
     
@@ -921,7 +922,15 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
 
     # Who are we?
     pid = getpid()
-    
+
+    # Usually, we only intake a certain number of events
+    maxEvents = math.floor(args.N/args.threads)
+    if maxEvents < 0:
+        print("(PID %d): Listening until terminated..." % pid, file=sys.stderr)
+        maxEvents = -1
+    else:
+        print("(PID %d): Listening for %d total events..." % (pid, maxEvents), file=sys.stderr)
+
     # If we pedestalling, load the pedestal
     activePedestal = None
     if args.subtract:
@@ -934,15 +943,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     if args.timing:
         activeTiming = pickle.load(open(args.timing, "rb"))
         print("(PID %d): Using timing file %s" % (pid, args.timing), file=sys.stderr)
-        
-    # Usually, we only intake a certain number of events
-    maxEvents = math.floor(args.N/args.threads)
-    if not maxEvents:
-        print("(PID %d): Listening until terminated..." % pid, file=sys.stderr)
-        maxEvents = -1
-    else:
-        print("(PID %d): Listening for %d total events..." % (pid, maxEvents), file=sys.stderr)
-    
+            
     # Start listening
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind((socket.gethostbyname(listen_tuple[0]), listen_tuple[1]))

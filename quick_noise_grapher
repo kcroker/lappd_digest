@@ -11,4 +11,4 @@ datestr=`date +%H:%M:%S`
 
 # Graph
 
-echo "set term wxt; set grid; plot for [i in '$*'] 'pedstats_$datestr' using 1:(\$4 == i ? sqrt(\$3)/51173 : 1/0) w l lw 2 t sprintf('Channel %s', i)" | gnuplot -p
+echo "set grid; plot for [i in '$*'] 'pedstats_$datestr' using 1:(\$4 == i ? sqrt(\$3)/51173 : 1/0) w l lw 2 t sprintf('Channel %s', i)" | gnuplot -p

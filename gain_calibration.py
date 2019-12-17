@@ -27,7 +27,7 @@ args.offset = True
 # Since the scripts now only listen for N/threads events
 # we need to use 2N since we want 2N
 samples = args.N
-args.N = 0
+args.N = -1
 
 # This is the fork() point, so it needs to be inside the
 # script called.

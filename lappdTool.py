@@ -72,7 +72,7 @@ def connect(parser):
     args = parser.parse_args()
 
     # Connect to the board
-    ifc = lappdIfc.lappdInterface(args.board, udpsport = 8888)
+    ifc = lappdIfc.lappdInterface(args.board)
 
     # Initialize the board, if requested
     if args.initialize:
@@ -127,6 +127,12 @@ def connect(parser):
         mysteryReg = ifc.brd.peeknow(0x370)
         ifc.brd.pokenow(0x370, mysteryReg | (1 << 5))
 
+    # If there is a timing calibration applied, things must be in capacitor order
+    # (we calibrte them right before shipping completed events)
+    if args.timing and not args.offset:
+        print("Timing calibration given, forcing capacitor ordering for correct application...", file=stderr)
+        args.offset = True
+
     # Center the 
     # Return a tuble with the interface and the arguments
     return (ifc, args, eventQueue)
@@ -146,9 +152,13 @@ def disableTCAL(ifc):
 #
 def spawn(args, eventQueue):
 
+    # Short circuit if we aren't trying to get any packets
+    if not args.N:
+        return []
+    
     from subprocess import run
     from os import getpid
-    
+
     # Track the children
     intakeProcesses = [None]*args.threads
 

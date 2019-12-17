@@ -23,6 +23,8 @@ parser.add_argument('--ymin', metavar='YMIN', type=float, default=-0.01, help='B
 parser.add_argument('--ymax', metavar='YMAX', type=float, default=0.1, help='Topmost y-axis point.')
 parser.add_argument('--gain', metavar='GAIN', type=int, default=51242, help='ADC counts per volt')
 
+parser.add_argument('--threshold', metavar='THRESHOLD', type=float, help='Only "trigger" when above threshold')
+
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
 
@@ -58,34 +60,77 @@ evt = eventQueue.get()
 lines = []
 chans = []
 for chan in evt.channels.keys():
-    lines.append(ax.plot(np.linspace(args.xmin, args.xmax, 10), [0]*10)[0])
+    line = ax.plot(np.linspace(args.xmin, args.xmax, 10), [0]*10, linestyle=('solid' if chan < 31 else 'dashed'))[0]
+    line.set_label('Channel %d' % chan)
+    lines.append(line)
     chans.append(chan)
-    
+
+ax.legend()
+zeros = [0.0]*1024
+
+
+prevTrigs = []
+
 def animate(i):
+    global prevTrigs
+    
     if not args.external:
         ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
 
         # Notify that a trigger was sent
         print("Trigger sent...", file=sys.stderr)
         time.sleep(args.i)
-    
-    evt = eventQueue.get()
 
+        #for i in range(20):
+    evt = eventQueue.get()
+        #
     
     # for chan, ampls in evt.channels:
+    currentTrigs = []
+    
     if isinstance(evt.channels[chans[0]][0], tuple):
 
+        found = False
         for n,line in enumerate(lines):
             xdata, ydata = zip(*evt.channels[chans[n]])
-            ydata = [y * args.gain if y is not None else None for y in ydata]
-            line.set_data(xdata, ydata)
+            ydata = [y * args.gain if y is not None else float('nan') for y in ydata]
 
+            for y in ydata:
+                if y > args.threshold:
+                    # Fire 
+                    line.set_data(xdata, ydata)
+                    found = True
+                    currentTrigs.append(line)
+                    print("Channel %d over threshold!" % chans[n])
+                    break
+
+        if found:
+            # Clear all other previous triggers
+            for prev in prevTrigs:
+                if not prev in currentTrigs:
+                    print("Clearing stale line")
+                    prev.set_data(xdata, zeros)
+
+            # Make the current triggers the previous ones
+            prevTrigs = currentTrigs
     else:
         for n,line in enumerate(lines):
             xdata, ydata = zip(*enumerate(evt.channels[chans[n]]))
-            ydata = [y * args.gain if y is not None else None for y in ydata]
-            line.set_data(xdata, ydata)
+            ydata = [y * args.gain if y is not None else float('nan') for y in ydata]
 
+            found = False
+            for y in ydata:
+                if y > args.threshold:
+                    # Fire 
+                    line.set_data(xdata, ydata)
+                    found = True
+                    break
+                
+            #if not found:
+            #    # Zero it out
+            #    line.set_data(xdata, zeros)
+            
+    eventQueue.task_done()
     return lines#,
 
 ani = animation.FuncAnimation(fig, animate, interval=10, blit=True, save_count=10)

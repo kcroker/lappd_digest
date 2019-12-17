@@ -11,7 +11,7 @@ import lappdTool           # UX shortcuts: mixed board and protocol stuff
 
 # Set up a new tool, with arguments common to the event digestion
 # subsystem.  All tools will share the same baseline syntax and semantics.
-parser = lappdTool.create("Take TCA sin samples")
+parser = lappdTool.create("Build a timing calibration from TCA sine samples")
 
 # Since we want high precision here, add the option to correct per-capacitor gains
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE',  help='Convert ADC counts into voltage using this gain profile')
@@ -31,8 +31,8 @@ args.offset = True
 # Save the number of samples we demand
 Nsamples = args.N
 
-# Set args.N = 0, so we keep listening indefinitely
-args.N = 0
+# Set args.N = -1, so we keep listening indefinitely
+args.N = -1
 
 # This is the fork() point, so it needs to be inside the
 # script called.
@@ -102,7 +102,10 @@ for k in range(0, Nsamples):
         if gainCorrection:
             for i in range(1024):
                 if not evt.channels[chan][i] is None:
-                    evt.channels[chan][i] *= gainCorrection[chan][i][0]
+                    # We multiply by 1000 to put things into milivolts
+                    #
+                    # XXX we should do this at computation of the gain calibration....
+                    evt.channels[chan][i] *= gainCorrection[chan][i][0] * 1000
             #print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
         
         # Go through the waveforms, stashing the squares already
@@ -162,9 +165,11 @@ for chan in chans:
         # Then:
         #    atan(sqrt(<y^2>/<x^2>))/(\pi 1e8) = \Delta_{ij}
         #
-        # Note: Our calibration oscillator is 100Mhz, so 1e8
+        # Note: Our calibration oscillator is 100Mhz, so 1e8.
+        #       We multiply by 1e9 to switch to nanoseconds
+        #       So the final factor is 10 (on top)
         #
-        xij[chan][i] = math.atan(math.sqrt(yij[chan][i]/xij[chan][i]))/(math.pi * 1e8)
+        xij[chan][i] = math.atan(math.sqrt(yij[chan][i]/xij[chan][i]))*10/math.pi
 
         print("%e %d" % (xij[chan][i], chan))
         print("Computed \Delta_{%d, %d+1} for calibration channel %d" % (i, i+1, chan), file=sys.stderr)
