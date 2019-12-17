@@ -869,12 +869,25 @@ class event(object):
         # Return the unpacked payload
         return tmp
 
-def export(anevent, eventQueue, dumpFile):
+def export(anevent, eventQueue, dumpFile, threshold):
 
     # For profiling of event reconstruction and
     # queueing
-    anevent.finish = time.time()
+    # anevent.finish = time.time()
 
+    # Very simple software thresholding
+    passed = True
+    if threshold:
+        passed = False
+        for channel in anevent.channels.values():
+            for ampl in channel:
+                if not ampl is None and ampl > threshold:
+                    passed = True
+                    break
+    if not passed:
+        del(anevent)
+        return
+    
     #
     # Recover as much space as possible
     # OOO Might be better to make an event nucleus
@@ -1030,7 +1043,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
 
                             # Track that we just shipped one
                             maxEvents -= 1
-                            export(currentEvents[tag], eventQueue, args.file)
+                            export(currentEvents[tag], eventQueue, args.file, args.threshold)
                             if (maxEvents & 255) == 0:
                                 print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
             
@@ -1094,7 +1107,7 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
 
                                 # Track that we are about to ship one
                                 maxEvents -= 1
-                                export(currentEvents[tag], eventQueue, args.file)
+                                export(currentEvents[tag], eventQueue, args.file, args.threshold)
 
                                 if (maxEvents & 255) == 0:
                                     print("Waiting for %d more events" % maxEvents, file=sys.stderr)

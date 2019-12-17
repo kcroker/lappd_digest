@@ -23,7 +23,7 @@ parser.add_argument('--ymin', metavar='YMIN', type=float, default=-0.01, help='B
 parser.add_argument('--ymax', metavar='YMAX', type=float, default=0.1, help='Topmost y-axis point.')
 parser.add_argument('--gain', metavar='GAIN', type=int, default=51242, help='ADC counts per volt')
 
-parser.add_argument('--threshold', metavar='THRESHOLD', type=float, help='Only "trigger" when above threshold')
+#parser.add_argument('--threshold', metavar='THRESHOLD', type=float, help='Only "trigger" when above threshold')
 
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
@@ -87,7 +87,8 @@ def animate(i):
     
     # for chan, ampls in evt.channels:
     currentTrigs = []
-    
+
+    # Thresholding should be redundant...
     if isinstance(evt.channels[chans[0]][0], tuple):
 
         found = False

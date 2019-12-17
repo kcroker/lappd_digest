@@ -29,9 +29,6 @@ parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Output 
 ifc, args, eventQueue = lappdTool.connect(parser)
 
 # Simple sanity check
-if not args.N > 0:
-    raise Exception("Number of samples must be greater than 0")
-
 if args.i < 0:
     raise Exception("Interval must be positive")
 

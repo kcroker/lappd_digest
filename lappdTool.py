@@ -35,6 +35,8 @@ def create(leader):
     parser.add_argument('-w', '--wait', metavar='WAIT', type=int, help="Adjust delay between receipt of soft/hard trigger and sampling stop. (Persistant)")
     parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
 
+    parser.add_argument('-b', '--threshold', metavar='THRESHOLD', type=int, help='Discard events with ADC count amplitude below this threshold value')
+    
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
     #
