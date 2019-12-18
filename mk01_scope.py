@@ -72,7 +72,7 @@ zeros = [0.0]*1024
 prevTrigs = []
 
 def animate(i):
-    global prevTrigs
+    #global prevTrigs
     
     if not args.external:
         ifc.brd.pokenow(0x320, (1 << 6), readback=False, silent=True)
@@ -86,34 +86,36 @@ def animate(i):
         #
     
     # for chan, ampls in evt.channels:
-    currentTrigs = []
+    #currentTrigs = []
 
     # Thresholding should be redundant...
     if isinstance(evt.channels[chans[0]][0], tuple):
 
-        found = False
+        #found = False
         for n,line in enumerate(lines):
             xdata, ydata = zip(*evt.channels[chans[n]])
             ydata = [y * args.gain if y is not None else float('nan') for y in ydata]
+            line.set_data(xdata, ydata)
 
-            for y in ydata:
-                if y > args.threshold:
+            
+            #for y in ydata:
+            #    if y > args.threshold:
                     # Fire 
-                    line.set_data(xdata, ydata)
-                    found = True
-                    currentTrigs.append(line)
-                    print("Channel %d over threshold!" % chans[n])
-                    break
+            #        line.set_data(xdata, ydata)
+            #        found = True
+            #        currentTrigs.append(line)
+            #        print("Channel %d over threshold!" % chans[n])
+            #        break
 
-        if found:
+        #if found:
             # Clear all other previous triggers
-            for prev in prevTrigs:
-                if not prev in currentTrigs:
-                    print("Clearing stale line")
-                    prev.set_data(xdata, zeros)
+        #    for prev in prevTrigs:
+        #        if not prev in currentTrigs:
+        #            print("Clearing stale line")
+        #            prev.set_data(xdata, zeros)
 
             # Make the current triggers the previous ones
-            prevTrigs = currentTrigs
+        #    prevTrigs = currentTrigs
     else:
         for n,line in enumerate(lines):
             xdata, ydata = zip(*enumerate(evt.channels[chans[n]]))

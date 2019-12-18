@@ -50,10 +50,10 @@ def create(leader):
     # For both sides of the DRS rows
 
     parser.add_argument('--oofs', metavar='OOFS', type=float, default=0.0, help='OOFS DAC output voltage')
-    parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.05, help='ROFS DAC output voltage')
+    parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.054, help='ROFS DAC output voltage')
     #parser.add_argument('--tcal', metavar='TCAL', type=float, default=0.84, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     #parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.0238, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
-    parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.05, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
+    parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.054, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     parser.add_argument('--cmofs', metavar='CMOFS', type=float, default=1.2, help='CMOFS DAC output Voltage')
     parser.add_argument('--bias', metavar='BIAS', type=float, default=0.7, help='BIAS DAC output Voltage') #usually 0.7
     

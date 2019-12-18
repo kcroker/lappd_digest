@@ -873,7 +873,7 @@ def export(anevent, eventQueue, dumpFile, threshold):
 
     # For profiling of event reconstruction and
     # queueing
-    # anevent.finish = time.time()
+    anevent.finish = time.time()
 
     # Very simple software thresholding
     passed = True
@@ -884,10 +884,14 @@ def export(anevent, eventQueue, dumpFile, threshold):
                 if not ampl is None and ampl > threshold:
                     passed = True
                     break
+                
+            # Get out of this one too
+            if passed:
+                break
+            
     if not passed:
-        del(anevent)
-        return
-    
+        return False
+
     #
     # Recover as much space as possible
     # OOO Might be better to make an event nucleus
@@ -929,6 +933,9 @@ def export(anevent, eventQueue, dumpFile, threshold):
 
     except queue.Full as e:
         print(e)
+
+    # Report that we made it
+    return passed
     
 # Multiprocess fork() entry point
 def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, subtract=None):
@@ -1042,11 +1049,12 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                         if currentEvents[tag].complete:
 
                             # Track that we just shipped one
-                            maxEvents -= 1
-                            export(currentEvents[tag], eventQueue, args.file, args.threshold)
-                            if (maxEvents & 255) == 0:
-                                print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
-            
+                            if export(currentEvents[tag], eventQueue, args.file, args.threshold):
+                                maxEvents -= 1
+                                if (maxEvents & 255) == 0:
+                                    print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
+
+                            # Always get rid of it from this end
                             del(currentEvents[tag])
                             numCurrentEvents -= 1
                             
@@ -1105,14 +1113,13 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                             if currentEvents[tag].complete:
                                 #print("Orphans completed an event, pushing...", file=sys.stderr)
 
-                                # Track that we are about to ship one
-                                maxEvents -= 1
-                                export(currentEvents[tag], eventQueue, args.file, args.threshold)
-
-                                if (maxEvents & 255) == 0:
-                                    print("Waiting for %d more events" % maxEvents, file=sys.stderr)
+                                # Track that we are about to ship one (if we passed threshold)
+                                if export(currentEvents[tag], eventQueue, args.file, args.threshold):
+                                    maxEvents -= 1
+                                    if (maxEvents & 255) == 0:
+                                        print("Waiting for %d more events" % maxEvents, file=sys.stderr)
             
-                                # Remove it from the list
+                                # Always get rid of it from here
                                 del(currentEvents[tag])
                                 numCurrentEvents -= 1
                                 
