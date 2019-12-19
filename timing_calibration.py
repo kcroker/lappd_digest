@@ -20,6 +20,9 @@ parser.add_argument('-D', '--deltas', metavar='CHIP_DELTAS_FILE', help='Input ex
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
 
+# Turn off external respose
+lappdTool.externalOff()
+
 # Die if no pedestal is given
 if not args.subtract:
     print("ERROR: You must provide a pedestal in order to perform timing calibration", file=sys.stderr)
@@ -34,15 +37,12 @@ Nsamples = args.N
 # Set args.N = -1, so we keep listening indefinitely
 args.N = -1
 
-# This is the fork() point, so it needs to be inside the
-# script called.
-if __name__ == "__main__":
-    intakeProcesses = lappdTool.spawn(args, eventQueue)
-
-############## COMMON TOOL INITIALIZATION END ##############
-
 # Enable the sin
 ifc.DrsTimeCalibOscOn()
+
+# Sleep a bit
+print("Sleeping for 100ms second to allow the calibration to get smooth...", file=sys.stderr)
+time.sleep(0.1)
 
 # Save previous ones
 masklow = ifc.brd.peeknow(0x670)
@@ -71,6 +71,16 @@ board_id = evt.board_id.hex()
 # Get board active channels
 chans = evt.channels.keys()
 
+# This is the fork() point, so it needs to be inside the
+# script called.
+#
+# This has to be done after setting things, so if we are hardware
+# triggering, its okay.
+if __name__ == "__main__":
+    intakeProcesses = lappdTool.spawn(args, eventQueue)
+
+############## COMMON TOOL INITIALIZATION END ##############
+
 # Make the nishimura romero-wolf variables
 xij = {}
 yij = {}
@@ -83,11 +93,12 @@ for chan in chans:
 # Now populate them
 for k in range(0, Nsamples):
 
-    # Wait for it to settle
-    time.sleep(args.i)
+    if not args.external:
+        # Wait for it to settle
+        time.sleep(args.i)
 
-    # Software trigger
-    ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
+        # Software trigger
+        ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
 
     # Wait for the event
     evt = eventQueue.get()

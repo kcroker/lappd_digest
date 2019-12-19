@@ -19,6 +19,8 @@ parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Tim
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Gain calibration to apply to pickled events.')
 parser.add_argument('-d', '--dump', action='store_true', help='Dump the calibrated events to stdout. (works only with 1 thread!)')
 
+parser.add_argument('--incom', action='store_true', help='Dump in Incom format')
+
 # Get dem args
 args = parser.parse_args()
 
@@ -26,7 +28,19 @@ args = parser.parse_args()
 if args.dump and args.threads > 1:
     print("ERROR: Can only have one thread reporting to stdout.", file=sys.stderr)
     exit(1)
-    
+
+if args.incom and (args.timing or args.gain):
+    print("ERROR: Incom expects only pedestalled data")
+    exit(2)
+
+# Dump the binary header
+if args.incom and args.dump:
+    # 4 byte blocks:
+    #   + 3 (file header)
+    #   + chans * 1025 (timing stuff)
+    #   + 2 (board headers)
+    sys.stdout.buffer.write(b'\0' * (3 + 2 + 8*1025)*4)
+
 # I'm sure theres a smart way to do this
 assignments = [[] for x in range(args.threads)]
 
@@ -108,7 +122,11 @@ def calibrate(assignments, eventQueue, args):
 
                 # Did we want ascii?
                 if args.dump:
-                    lappdProtocol.dump(e)
+                    if not args.incom:
+                        lappdProtocol.dump(e)
+                    else:
+                        lappdProtocol.incom(e)
+                        
                 else:
                     # Write out the calibrated event
                     pickle.dump(e, dest)

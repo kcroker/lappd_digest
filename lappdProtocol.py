@@ -1166,8 +1166,57 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
     # Wait for the parent to join
     #eventQueue.close()
 #
-# Utility function to dump a pedestal subtracted event
+# Utility function to dump events
 #
+# 1024*4 channels = 4096 (2 byte words)
+#
+incomSixEvent = struct.Struct("<8x 4096H")
+
+def incom(event):
+
+    # Sort and just get amplitudes
+    channel_amplitudes = [event.channels[chan] for chan in sorted(event.channels.keys())]
+
+    # Add phantom channels
+    channel_amplitudes.append([0]*1024)
+    channel_amplitudes.append([0]*1024)
+
+    # The need unsigned integers and no Nones
+    complete = []
+    for i in range(4):
+
+        ampls = channel_amplitudes[i]
+        
+        # Overwrite it
+        complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
+
+    # Write event header garbage
+    sys.stdout.buffer.write(b'\x01'*32)
+
+    # Produce an event struct
+    outbytes = incomSixEvent.pack(*complete)
+
+    # Write the data
+    sys.stdout.buffer.write(outbytes)
+
+    complete = []
+    for i in range(4,8):
+
+        ampls = channel_amplitudes[i]
+        
+        # Overwrite it
+        complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
+
+    # Write event header garbage
+    sys.stdout.buffer.write(b'\x02'*32)
+        
+    # Produce an event struct
+    outbytes = incomSixEvent.pack(*complete)
+
+    # Write the data
+    sys.stdout.buffer.write(outbytes)
+
+    
 def dump(event):
     # # Dump the entire detection in ASCII
     print("# event number = %d\n# y_max = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1))

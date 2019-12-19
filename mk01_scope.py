@@ -22,6 +22,7 @@ parser.add_argument('--xmax', metavar='XMAX', type=float, default=1024, help='Ri
 parser.add_argument('--ymin', metavar='YMIN', type=float, default=-0.01, help='Bottommost y-axis point')
 parser.add_argument('--ymax', metavar='YMAX', type=float, default=0.1, help='Topmost y-axis point.')
 parser.add_argument('--gain', metavar='GAIN', type=int, default=51242, help='ADC counts per volt')
+parser.add_argument('--quiet', action='store_true', help='Do not dump thresholded events to stdout')
 
 #parser.add_argument('--threshold', metavar='THRESHOLD', type=float, help='Only "trigger" when above threshold')
 
@@ -84,7 +85,9 @@ def animate(i):
         #for i in range(20):
     evt = eventQueue.get()
         #
-    
+    if not args.quiet:
+        lappdProtocol.dump(evt)
+                       
     # for chan, ampls in evt.channels:
     #currentTrigs = []
 
@@ -96,42 +99,11 @@ def animate(i):
             xdata, ydata = zip(*evt.channels[chans[n]])
             ydata = [y * args.gain if y is not None else float('nan') for y in ydata]
             line.set_data(xdata, ydata)
-
-            
-            #for y in ydata:
-            #    if y > args.threshold:
-                    # Fire 
-            #        line.set_data(xdata, ydata)
-            #        found = True
-            #        currentTrigs.append(line)
-            #        print("Channel %d over threshold!" % chans[n])
-            #        break
-
-        #if found:
-            # Clear all other previous triggers
-        #    for prev in prevTrigs:
-        #        if not prev in currentTrigs:
-        #            print("Clearing stale line")
-        #            prev.set_data(xdata, zeros)
-
-            # Make the current triggers the previous ones
-        #    prevTrigs = currentTrigs
     else:
         for n,line in enumerate(lines):
             xdata, ydata = zip(*enumerate(evt.channels[chans[n]]))
             ydata = [y * args.gain if y is not None else float('nan') for y in ydata]
-
-            found = False
-            for y in ydata:
-                if y > args.threshold:
-                    # Fire 
-                    line.set_data(xdata, ydata)
-                    found = True
-                    break
-                
-            #if not found:
-            #    # Zero it out
-            #    line.set_data(xdata, zeros)
+            line.set_data(xdata, ydata)
             
     eventQueue.task_done()
     return lines#,

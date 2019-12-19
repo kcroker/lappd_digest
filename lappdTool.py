@@ -50,10 +50,10 @@ def create(leader):
     # For both sides of the DRS rows
 
     parser.add_argument('--oofs', metavar='OOFS', type=float, default=0.0, help='OOFS DAC output voltage')
-    parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.054, help='ROFS DAC output voltage')
+    parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.05, help='ROFS DAC output voltage')
     #parser.add_argument('--tcal', metavar='TCAL', type=float, default=0.84, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     #parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.0238, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
-    parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.054, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
+    parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.05, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     parser.add_argument('--cmofs', metavar='CMOFS', type=float, default=1.2, help='CMOFS DAC output Voltage')
     parser.add_argument('--bias', metavar='BIAS', type=float, default=0.7, help='BIAS DAC output Voltage') #usually 0.7
     
@@ -93,7 +93,7 @@ def connect(parser):
     # Make a good (useful?) filename
     if args.file:
         import datetime
-        args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H:%M:%S"))
+        args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H%M%S"))
 
     # Set DAC voltages
     ifc.DacSetVout(DAC_OOFS, args.oofs)
@@ -124,16 +124,16 @@ def connect(parser):
         ifc.brd.pokenow(lappdIfc.DRSWAITSTART, args.wait)
         print("Setting STOP delay to: %d" % args.wait, file=stderr)
 
-    # Enable the external trigger if it was requested
-    if args.external:
-        mysteryReg = ifc.brd.peeknow(0x370)
-        ifc.brd.pokenow(0x370, mysteryReg | (1 << 5))
-
     # If there is a timing calibration applied, things must be in capacitor order
     # (we calibrte them right before shipping completed events)
     if args.timing and not args.offset:
         print("Timing calibration given, forcing capacitor ordering for correct application...", file=stderr)
         args.offset = True
+
+    # Enable the external trigger if it was requested
+    if args.external:
+        mysteryReg = ifc.brd.peeknow(0x370)
+        ifc.brd.pokenow(0x370, mysteryReg | (1 << 5))
 
     # Center the 
     # Return a tuble with the interface and the arguments
