@@ -30,7 +30,7 @@ if args.dump and args.threads > 1:
     exit(1)
 
 if args.incom and (args.timing or args.gain):
-    print("ERROR: Incom expects only pedestalled data")
+    print("ERROR: Incom expects only pedestalled data", file=sys.stderr)
     exit(2)
 
 # Dump the binary header
@@ -39,7 +39,8 @@ if args.incom and args.dump:
     #   + 3 (file header)
     #   + chans * 1025 (timing stuff)
     #   + 2 (board headers)
-    sys.stdout.buffer.write(b'\0' * (3 + 2 + 8*1025)*4)
+    sys.stdout.buffer.write(b'\0' * 4)
+    
 
 # I'm sure theres a smart way to do this
 assignments = [[] for x in range(args.threads)]

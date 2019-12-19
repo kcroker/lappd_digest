@@ -1168,11 +1168,38 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
 #
 # Utility function to dump events
 #
-# 1024*4 channels = 4096 (2 byte words)
+# (1024shorts + 4 shorts) *4 channels = 4112 (2 byte words)
 #
-incomSixEvent = struct.Struct("<8x 4096H")
+incomSixEvent = struct.Struct("<4112H")
+firstIncom = True
 
 def incom(event):
+    global firstIncom
+
+    # The DRS2 header?
+    # sys.stdout.buffer.write(b'\0' * 4)
+
+    if firstIncom:
+        # Output a fake time header
+
+        # 1025 rows: 1 label, 1024 bins times (per channel)
+        #  x4 because each row is 4 bytes
+        #  x4 because this happens for each channel
+
+        # TIME header
+        sys.stdout.buffer.write(b'\x33' * 4)
+
+        # board identifier
+        sys.stdout.buffer.write(b'\x33' * 4)
+
+        # fake header and floats for 4 channels
+        sys.stdout.buffer.write(b'\x33' * ((1025)*4*4))
+
+        # Board identifier
+        sys.stdout.buffer.write(b'\x33' * 4)
+
+        # fake header and floats for 4 channels
+        sys.stdout.buffer.write(b'\x33' * ((1025)*4*4))
 
     # Sort and just get amplitudes
     channel_amplitudes = [event.channels[chan] for chan in sorted(event.channels.keys())]
@@ -1188,16 +1215,29 @@ def incom(event):
         ampls = channel_amplitudes[i]
         
         # Overwrite it
+        # 8 pad bytes, 4 pad shorts
+        complete += [0]*4
         complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
-
+    
     # Write event header garbage
-    sys.stdout.buffer.write(b'\x01'*32)
+    sys.stdout.buffer.write(b'\x01'*(6*4))
 
+    # Board header garbage
+    sys.stdout.buffer.write(b'\x01'*(2*4))
+    
     # Produce an event struct
     outbytes = incomSixEvent.pack(*complete)
 
     # Write the data
     sys.stdout.buffer.write(outbytes)
+
+    # Now this is the second board
+    if firstIncom:
+        # Output a fake time header
+        #sys.stdout.buffer.write(b'\x33' * ((2 + 1025)*4*4))
+
+        # Don't do this anymore
+        firstIncom = False
 
     complete = []
     for i in range(4,8):
@@ -1205,10 +1245,11 @@ def incom(event):
         ampls = channel_amplitudes[i]
         
         # Overwrite it
+        complete += [0]*4
         complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
 
-    # Write event header garbage
-    sys.stdout.buffer.write(b'\x02'*32)
+    # This is board header garbage
+    sys.stdout.buffer.write(b'\x02'*(2*4))
         
     # Produce an event struct
     outbytes = incomSixEvent.pack(*complete)
