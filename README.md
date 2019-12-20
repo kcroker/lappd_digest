@@ -1,3 +1,77 @@
+# LAPPD Digest v0.1 (alpha)
+
+These are a set of organically grown tools designed to enable rapid exercise of firmware capabilities developed for the A2x series of Ultralytics LAPPD mating boards.
+Tools for acquisition and application of calibration of offline data are multiprocess.
+Tools for calibration are in various states of being re-written for multiprocess functionality, and reduced memory consumption.
+
+The design decision was speed of capability exploration, not speed of tool.
+Therefore, we chose Python 3.5.
+Next generation tools, based in C, should provide order of magnitude improvements (at least) in performance.
+Further, we wanted an interface that was more easily accessible to junior researchers like undergraduates and graduates.
+
+Incoming event data can be handled on-the-fly via IPC message queues, or rapidly via multiprocess parallel disk dumps of Python pickled objects.
+Data can also be calibrated on the fly, or at a later time.
+A rudimentary oscilliscope has been implemented, we have found it quite useful.
+Feel free to extend it :D
+
+The offline calibration tool has been augmented to output skeletal uncalibrated waveforms in the DRS4 eval software binary format.
+In this way, the A2x series can be quickly used as a drop in replacement for existing DRS4 eval board configurations (regardless of whether an LAPPD tile is mated or not).
+
+The core of the code has not yet been optimized, prefering clarity over speed.
+Also, this was my first backend DAQ project, so please forgive my obvious poor design decisions (e.g. bit packed protocol format).
+
+# Guerrila install
+
+The following instructions should allow you to produce a functional environment.
+The LAPPD series of boards uses the Evolvable Embedded Vehicle for Execution of Experiments (EEVEE) platform for network appliance capability and register control, so this project is a prerequisite.
+Note that not all features have been merged into the master branch yet.
+
+1. clone `lappd_digest`
+
+```bash
+$ git clone https://github.com/kcroker/lappd_digest
+```
+
+2. Change to this directory, clone `eevee`, and set up the environment
+
+```bash
+$ cd lappd_digest
+$ git clone https://github.com/kcroker/eevee
+$ export EEVEE_SRC_PATH=`realpath ./eevee`
+```
+
+Note that the final `export` command is not persistent.
+The environment must provide this path for EEVEE to work, so consider adding it to your `.bashrc`, `.profile`, or startup files appropriate for your shell of choice.
+Depending on your python3 install, you may need also need to
+
+```bash
+$ export PYTHONPATH=$PYTHONPATH:`realpath ./eevee`
+```
+Again, if necessary, this environemnt variable can be persistently extended within your shell configuration.
+
+3. Install the bitstruct
+
+The Mark I protocol uses bitpacked headers.
+This was implemented with the Python 3 package `bitstruct`.
+To install it locally for your user
+
+```bash
+$ pip3 install bitstruct
+```
+
+## Bringing up A2x + EEVEE
+If your network segment has DHCP, the board will automatically join the network.
+Boards respond to broadcast pings or can be discovered in Python.
+Once a board is up via DHCP, it is accessible in every way that any other IP device is accessible on that segment.
+Bear this in mind for network security purposes.
+In particular, boards can have their data path pointed off of the physical network, making them a potent DoS tool if abused.
+
+If your network segment does not have DHCP, you can bring boards up one at a time by pinging at the desired IP address on the segment.
+The board will watch and make sure no one else responds via the ARP request that such pings will trigger from your own OS.
+If no other device responds, the board will assign itself this IP address.
+In this mode, there is no external route set and the behaviour, if pointed off the segment, is undefined.
+Note that if you have multiple boards, they must be brought up one by one if operating in this mode.
+
 ## Initializing and taking pedestals
 
 ```
