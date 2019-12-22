@@ -869,19 +869,29 @@ class event(object):
         # Return the unpacked payload
         return tmp
 
-def export(anevent, eventQueue, dumpFile, threshold):
+def export(anevent, eventQueue, args):
 
+    # If we don't receive an event, that means we're done
+    if not anevent:
+        # If there was a dumpFile, close it
+        if args.file:
+            print("\n(PID %d): Closing dump.." % pid, file=sys.stderr)
+            args.file.close()
+
+        return
+
+    # Otherwise, do stuff
     # For profiling of event reconstruction and
     # queueing
     anevent.finish = time.time()
 
     # Very simple software thresholding
     passed = True
-    if threshold:
+    if args.threshold:
         passed = False
         for channel in anevent.channels.values():
             for ampl in channel:
-                if not ampl is None and ampl > threshold:
+                if not ampl is None and ampl > args.threshold:
                     passed = True
                     break
                 
@@ -923,8 +933,8 @@ def export(anevent, eventQueue, dumpFile, threshold):
     try:
         
         # Push it to another process?
-        if dumpFile:
-            pickle.dump(anevent, dumpFile)
+        if args.file:
+            pickle.dump(anevent, args.file)
             # eventQueue.put(anevent.evt_number, block=False)
         else:
             # There's always a queue for controlling the processes
@@ -938,7 +948,17 @@ def export(anevent, eventQueue, dumpFile, threshold):
     return passed
     
 # Multiprocess fork() entry point
-def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, subtract=None):
+#
+# processingHook:
+#   This is a function which takes an event, an eventQueue, and args.
+#   It does some sort of paralleled processing on the event data.
+#   If it receives a None event, it sends its processing deliverable
+#   via IPC.
+#
+#   The default behaviour is lappdProtocol.export(...): apply any calibrations, and then ship the event
+#   via IPC or dump it to binary
+#
+def intake(listen_tuple, eventQueue, args, processingHook=export): #dumpFile=None, keep_offset=False, subtract=None):
 
     # Who are we?
     pid = getpid()
@@ -1048,12 +1068,23 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                         # Did we complete one?
                         if currentEvents[tag].complete:
 
-                            # Track that we just shipped one
-                            if export(currentEvents[tag], eventQueue, args.file, args.threshold):
+                            # Process the event
+                            if processingHook(currentEvents[tag], eventQueue, args):
                                 maxEvents -= 1
                                 if (maxEvents & 255) == 0:
-                                    print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
 
+                                    # Compute a rate if we can
+                                    if prevProcessingTime:
+                                        print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(currentEvents[tag].finish - prevProcessingTime)), file=sys.stderr)
+
+                                    # Record this event's time
+                                    prevProcessingTime = currentEvents[tag].finish
+
+                                    # Stop displaying weird negative events remaining
+                                    if maxEvents > 0:
+                                        print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
+
+                                        
                             # Always get rid of it from this end
                             del(currentEvents[tag])
                             numCurrentEvents -= 1
@@ -1114,10 +1145,20 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
                                 #print("Orphans completed an event, pushing...", file=sys.stderr)
 
                                 # Track that we are about to ship one (if we passed threshold)
-                                if export(currentEvents[tag], eventQueue, args.file, args.threshold):
+                                if processingHook(currentEvents[tag], eventQueue, args):
                                     maxEvents -= 1
                                     if (maxEvents & 255) == 0:
-                                        print("Waiting for %d more events" % maxEvents, file=sys.stderr)
+
+                                        # Compute a rate if we can
+                                        if prevProcessingTime:
+                                            print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(currentEvents[tag].finish - prevProcessingTime)), file=sys.stderr)
+
+                                        # Record this event's time
+                                        prevProcessingTime = currentEvents[tag].finish
+
+                                        # Stop displaying weird negative events remaining
+                                        if maxEvents > 0:
+                                            print("(PID %d): Waiting for %d more events" % (pid, maxEvents), file=sys.stderr)
             
                                 # Always get rid of it from here
                                 del(currentEvents[tag])
@@ -1142,10 +1183,8 @@ def intake(listen_tuple, eventQueue, args): #dumpFile=None, keep_offset=False, s
         except KeyboardInterrupt:
             print("\n(PID %d): Caught SIGINT." % pid, file=sys.stderr)
 
-            # If there was a dumpFile, close it
-            if args.file:
-                print("\n(PID %d): Closing dump.." % pid, file=sys.stderr)
-                args.file.close()
+            # Call the cleanup of the processHook
+            processHook(None, eventQueue, args)
             
             print("(PID %d): At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (pid, len(orphanedHits), len(currentEvents)), file=sys.stderr)
             print("(PID %d): Remaining number of events: %d" % (pid, maxEvents), file=sys.stderr)

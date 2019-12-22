@@ -77,99 +77,124 @@ chans = evt.channels.keys()
 # This has to be done after setting things, so if we are hardware
 # triggering, its okay.
 if __name__ == "__main__":
-    intakeProcesses = lappdTool.spawn(args, eventQueue)
+    intakeProcesses = lappdTool.spawn(args, eventQueue, timingAccumulator)
 
 ############## COMMON TOOL INITIALIZATION END ##############
 
+#
+# This is called from another process, so it always runs
+# in the child process.
+#
+# Need to take care that these local variables stay in the child
+# (I think they will, but we'll see...)
 # Make the nishimura romero-wolf variables
+#
+# Each process will have its own copy of these variables.
+#
 xij = {}
 yij = {}
+counts = {}
 
 for chan in chans:
     # Initialize the pairs list
     xij[chan] = [0 for x in range(1024)]
     yij[chan] = [0 for y in range(1024)]
 
-# Now populate them
-for k in range(0, Nsamples):
+    # Initialize the count of tabulated samples
+    counts[chan] = [0 for i in range(1024)]
 
-    if not args.external:
+def timingAccumulator(event, eventQueue, args):
+
+    # If we're not None, then we should accumulate
+    if event:
+        # Process it right here.
+        for chan in event.channels.keys():
+            # First, apply the gain correction (since we don't usually care enough about this elsewhere)
+            if args.gain:
+                for i in range(1024):
+                    if not evt.channels[chan][i] is None:
+                        # We multiply by 1000 to put things into milivolts
+                        #
+                        # XXX we should do this at computation of the gain calibration....
+                        evt.channels[chan][i] *= args.gain[chan][i][0] * 1000
+                #print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
+
+            # Go through the waveforms, stashing the squares already
+
+            for i in range(1023):
+                if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
+                    xij[chan][i] += (evt.channels[chan][i] + evt.channels[chan][i+1])**2
+                    yij[chan][i] += (evt.channels[chan][i] - evt.channels[chan][i+1])**2
+                    counts[chan][i] += 1
+
+            # Don't forget the reach around
+            if not evt.channels[chan][1023] is None and not evt.channels[chan][0] is None:
+                xij[chan][1023] += (evt.channels[chan][1023] + evt.channels[chan][0])**2
+                yij[chan][1023] += (evt.channels[chan][1023] - evt.channels[chan][0])**2
+                counts[chan][1023] += 1
+    else:
+        # Now its time to ship our results via IPC
+        eventQueue.put((xij, yij, counts))
+
+#
+# Now populate them
+#
+# For external triggers, each intake() when terminate when Nsamples/Nprocesses have been
+# processed.
+#
+# For software triggers, intake() is instructed to terminate after the given number of
+# soft triggers has been sent.
+#
+if not args.external:
+    for k in range(0, Nsamples):
+
         # Wait for it to settle
         time.sleep(args.i)
 
         # Software trigger
         ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
 
-    # Wait for the event
-    evt = eventQueue.get()
-
-    # Modestly print out status
-    if k & 255 == 0:
-        print("Received event %d" % k, file=sys.stderr)
-
-    # Process it right here.
-    for chan in chans:
-        # First, apply the gain correction (since we don't usually care enough about this elsewhere)
-        if gainCorrection:
-            for i in range(1024):
-                if not evt.channels[chan][i] is None:
-                    # We multiply by 1000 to put things into milivolts
-                    #
-                    # XXX we should do this at computation of the gain calibration....
-                    evt.channels[chan][i] *= gainCorrection[chan][i][0] * 1000
-            #print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
-        
-        # Go through the waveforms, stashing the squares already
-
-        for i in range(1023):
-            if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
-                #xij[chan][i].append( (evt.channels[chan][i] + evt.channels[chan][i+1])**2 )
-                xij[chan][i] += (evt.channels[chan][i] + evt.channels[chan][i+1])**2
-                #yij[chan][i].append( (evt.channels[chan][i] - evt.channels[chan][i+1])**2 )
-                yij[chan][i] += (evt.channels[chan][i] - evt.channels[chan][i+1])**2
-            
-            # Don't forget the reach around
-            if not evt.channels[chan][1023] is None and not evt.channels[chan][0] is None:
-                #xij[chan][1023].append( (evt.channels[chan][1023] + evt.channels[chan][0])**2 )
-                xij[chan][1023] += (evt.channels[chan][1023] + evt.channels[chan][0])**2
-                #yij[chan][1023].append( (evt.channels[chan][1023] - evt.channels[chan][0])**2 )
-                yij[chan][1023] += (evt.channels[chan][1023] - evt.channels[chan][0])**2
-
+    # Tell children to clean up
+    # This means to report back whatever you have...
+    lappdTool.reap(intakeProcesses, args)
     
-    # Add some info and stash it
-    # evts.append(evt)
+# Wait for the partial data to come in from all children
+for proc in intakeProcesses:
 
-    # Signal that we got it.
+    # Get the partial data
+    pxij, pyij, pcounts = eventQueue.get()
+
+    # Accumulate into the first responder
+    if len(xij.keys()) == 0:
+        xij = pxij
+        yij = pyij
+        counts = pcounts
+    else:
+        for chan in xij.keys():
+            xij[chan] += pxij[chan]
+            yij[chan] += pyij[chan]
+            counts[chan] += pcounts[chan]
+
+    # Signal that we got it
     eventQueue.task_done()
 
 # Restore old channel masks
 ifc.brd.pokenow(0x670, masklow)
 ifc.brd.pokenow(0x674, maskhigh)
 
-# Turn off 
+# Turn off calibration 
 ifc.RegSetBit(lappdIfc.MODE, lappdIfc.C_MODE_TCA_ENA_BIT, 0)  
 
-############# BEGIN COMMON TOOL FOOTER
-
-# Reap listeners
-lappdTool.reap(intakeProcesses, args)
-
-############# END COMMON TOOL FOOTER 
-
-# Now do the analysis
+# Nw do the analysis
 # from scipy.stats import describe
 import math
     
-for chan in chans:
+for chan in xij.keys():
     # Okay, now compute the averages
     for i in range(1024):
 
-        # This function, computing 4 moments, is faster than just computing
-        # the damn average manually...
-        #
-        # XXX changed this from these numpy.float644's to regular python float...
-        xij[chan][i] = float(xij[chan][i]/Nsamples) #float(describe(xij[chan][i]).mean)
-        yij[chan][i] = float(yij[chan][i]/Nsamples) #float(describe(yij[chan][i]).mean)
+        xij[chan][i] = float(xij[chan][i]/counts[chan][i])
+        yij[chan][i] = float(yij[chan][i]/counts[chan][i])
 
         #
         # Assuming the integral average is a good approximation for this sample...
