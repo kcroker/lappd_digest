@@ -103,6 +103,11 @@ for chan in chans:
     # Initialize the count of tabulated samples
     counts[chan] = [0 for i in range(1024)]
 
+#
+# This hook gets called after an entire event is reassembled.
+# It *requires* that pedestalling has already been applied.
+# (which it has)
+#
 def timingAccumulator(event, eventQueue, args):
 
     # If we're not None, then we should accumulate

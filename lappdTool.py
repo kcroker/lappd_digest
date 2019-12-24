@@ -36,6 +36,7 @@ def create(leader):
     parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
 
     parser.add_argument('-b', '--threshold', metavar='THRESHOLD', type=int, help='Discard events with ADC count amplitude below this threshold value')
+    parser.add_argument('-l', '--listen', metavar='LISTEN_IP', type=str, default="0.0.0.0", help='Do not attempt to talk to any boards, instead just passively listen for data')
     
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
@@ -51,8 +52,6 @@ def create(leader):
 
     parser.add_argument('--oofs', metavar='OOFS', type=float, default=0.0, help='OOFS DAC output voltage')
     parser.add_argument('--rofs', metavar='ROFS', type=float, default=1.05, help='ROFS DAC output voltage')
-    #parser.add_argument('--tcal', metavar='TCAL', type=float, default=0.84, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
-    #parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.0238, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     parser.add_argument('--tcal', metavar='TCAL', type=float, default=1.05, help='Start values for TCAL_N1 and TCAL_N2 DAC output voltage')
     parser.add_argument('--cmofs', metavar='CMOFS', type=float, default=1.2, help='CMOFS DAC output Voltage')
     parser.add_argument('--bias', metavar='BIAS', type=float, default=0.7, help='BIAS DAC output Voltage') #usually 0.7
@@ -68,24 +67,68 @@ DAC_CMOFS = 3
 DAC_TCAL_N1 = 4
 DAC_TCAL_N2 = 5
 
+ifc = None
+
 def connect(parser):
+
+    global ifc
     
     # Parse the arguments
     args = parser.parse_args()
 
-    # Connect to the board
-    ifc = lappdIfc.lappdInterface(args.board)
+    # Are we talking to an actual board, or just receiving events from the aether?
+    if args.listen:
+        if not args.external:
+            raise Exception("Listening only makes sense in external triggering mode")
+    else:
+            
+        # Connect to the board
+        ifc = lappdIfc.lappdInterface(args.board)
 
-    # Initialize the board, if requested
-    if args.initialize:
-        ifc.Initialize()
+        # Initialize the board, if requested
+        if args.initialize:
+            ifc.Initialize()
 
-    # Set the requested threads on the hardware side 
-    ifc.brd.pokenow(lappdIfc.NUDPPORTS, args.threads)
+        # Set the requested threads on the hardware side 
+        ifc.brd.pokenow(lappdIfc.NUDPPORTS, args.threads)
 
-    # Give the socket address for use by spawn()
-    ifc.brd.aimNBIC(port=args.aim)
-    args.listen = ifc.brd.s.getsockname()[0]
+        # Give the socket address for use by spawn()
+        ifc.brd.aimNBIC(port=args.aim)
+        args.listen = ifc.brd.s.getsockname()[0]
+
+        # Set DAC voltages
+        ifc.DacSetVout(DAC_OOFS, args.oofs)
+        ifc.DacSetVout(DAC_CMOFS, args.cmofs)
+        ifc.DacSetVout(DAC_ROFS, args.rofs)
+        ifc.DacSetVout(DAC_BIAS, args.bias)
+        ifc.DacSetVout(DAC_TCAL_N1, args.tcal)
+        ifc.DacSetVout(DAC_TCAL_N2, args.tcal)
+
+        # Set the channels?
+        if args.channels:
+            chans = list(map(int, args.channels.split()))
+            print("Specifying channels: ", chans, file=stderr)
+
+            high = 0
+            low = 0
+            for chan in chans:
+                if chan < 32:
+                    low |= (1 << chan)
+                else:
+                    high |= (1 << (chan - 32))
+
+            ifc.brd.pokenow(0x670, low)
+            ifc.brd.pokenow(0x674, high)
+    
+        # Set the wait?
+        if args.wait:
+            ifc.brd.pokenow(lappdIfc.DRSWAITSTART, args.wait)
+            print("Setting STOP delay to: %d" % args.wait, file=stderr)
+
+        # Enable the external trigger if it was requested
+        if args.external:
+            mysteryReg = ifc.brd.peeknow(0x370)
+            ifc.brd.pokenow(0x370, mysteryReg | (1 << 5))
 
     # Make an event queue
     eventQueue = multiprocessing.JoinableQueue()
@@ -95,45 +138,11 @@ def connect(parser):
         import datetime
         args.file = "%s_%s" % (args.file, datetime.datetime.now().strftime("%d%m%Y-%H%M%S"))
 
-    # Set DAC voltages
-    ifc.DacSetVout(DAC_OOFS, args.oofs)
-    ifc.DacSetVout(DAC_CMOFS, args.cmofs)
-    ifc.DacSetVout(DAC_ROFS, args.rofs)
-    ifc.DacSetVout(DAC_BIAS, args.bias)
-    ifc.DacSetVout(DAC_TCAL_N1, args.tcal)
-    ifc.DacSetVout(DAC_TCAL_N2, args.tcal)
-
-    # Set the channels?
-    if args.channels:
-        chans = list(map(int, args.channels.split()))
-        print("Specifying channels: ", chans, file=stderr)
-
-        high = 0
-        low = 0
-        for chan in chans:
-            if chan < 32:
-                low |= (1 << chan)
-            else:
-                high |= (1 << (chan - 32))
-            
-        ifc.brd.pokenow(0x670, low)
-        ifc.brd.pokenow(0x674, high)
-
-    # Set the wait?
-    if args.wait:
-        ifc.brd.pokenow(lappdIfc.DRSWAITSTART, args.wait)
-        print("Setting STOP delay to: %d" % args.wait, file=stderr)
-
     # If there is a timing calibration applied, things must be in capacitor order
     # (we calibrte them right before shipping completed events)
     if args.timing and not args.offset:
         print("Timing calibration given, forcing capacitor ordering for correct application...", file=stderr)
         args.offset = True
-
-    # Enable the external trigger if it was requested
-    if args.external:
-        mysteryReg = ifc.brd.peeknow(0x370)
-        ifc.brd.pokenow(0x370, mysteryReg | (1 << 5))
 
     # Center the 
     # Return a tuble with the interface and the arguments
@@ -197,8 +206,10 @@ def spawn(args, eventQueue):
 # Send the death signal to the child and wait for it
 def reap(intakeProcesses, args):
 
-    # Disable the external trigger if requested
-    if args.external:
+    global ifc
+    
+    # Disable the external trigger if requested and we are talking to a board
+    if args.external and ifc:
         mysteryReg = ifc.brd.peeknow(0x370)
         ifc.brd.pokenow(0x370, mysteryReg & ~(1 << 5))
 

@@ -219,76 +219,12 @@ class timing(object):
 #
 class pedestal(object):
 
-    def __init__(self, samples):
-
-        # Now compute the pedestals
-        from scipy.stats import describe
-        from numpy import floor
-        
-        # Did we receive any samples?
-        if not len(samples):
-            raise Exception("Did not receive any samples!")
-
-        # Some board information
-        self.board_id = samples[0].board_id
-
-        # Use the first event to determine the list of channels
-        self.chan_list = samples[0].channels.keys()
-
-        # Sanity checks on the pedestal samples
-        for sample in samples:
-
-            if not isinstance(sample, event):
-                raise Exception("Encountered non-event in list of samples.  Nonsense.")
-
-            if not self.chan_list == sample.channels.keys():
-                raise Exception("Provided sample events for pedestaling have inhomogeneous channel content.  This .... is ... U N A C C E P T A B L E E E E ---- U N A C C E P T A B L E E E E E E E")
-            if not sample.keep_offset:
-                raise Exception("Refusing to build pedestals with torn data (ROI mode)")
+    def __init__(self, means, variances, counts):
 
         # Set up for pedestals
-        self.mean = {}
-        self.variance = {}
-
-        # Gotta do it manually
-        for chan_id in self.chan_list:
-            caps = [ [] for x in range(0, len(samples[0].channels[chan_id])) ]
-            self.mean[chan_id] = []
-            self.variance[chan_id] = []
-
-            for evt in samples:
-                for capacitor, ampl in enumerate(evt.channels[chan_id]):
-                    if not ampl is None:
-                        caps[capacitor].append(ampl)
-
-            # Now we have it in filtered capacitor form
-            for cap in caps:
-                # Cap is a list
-                N = len(cap)
-                if N == 0:
-                    self.mean[chan_id].append(None)
-                    self.variance[chan_id].append(None)
-                elif N == 1:
-                    self.mean[chan_id].append(cap)
-                    self.variance[chan_id].append(None)
-                else:
-                    bs, bs, mean, variance, *bs = describe(cap)
-
-                    #
-                    # Because the numpy method returns some ass-retarded type
-                    #
-                    # Note that we save the mean as an integer.
-                    # This lets us do integer subtraction without conversion when removing pedestals
-                    # directly from the data as it comes in.
-                    #
-                    # Since noise is a least 30 ADC counts, this changes nothing.
-                    #
-                    self.mean[chan_id].append(round(float(mean)))
-                    self.variance[chan_id].append(float(variance))
-
-        # Remove the samples because python can't pickle it
-        del(self.chan_list)
-
+        self.mean = means
+        self.variance = variances
+        self.counts = counts
     #
     # Return a pedestal subtracted list of amplitudes
     #
@@ -734,10 +670,10 @@ class event(object):
     # This converts a channel (as a hitstash object) into a Python integer list 
     #
     # OOO 2
-    #  1)  2^x modulo *can* be done fast...
-    #      << (width - x) then >> (width - x)
-    #  2)  Use memoryviews to directly index into the memory
-    #
+    #  1)  2^x modulo *can* be done fast with: x & ~((1 << width) - 1)
+    #  2)  Use memoryviews to directly index into the memory (this won't speed things up too much
+    #      (because we're always indexing a fixed number of times and the length isn't changing...)
+    #      (moreso, its just for bytes, so at this level we are done)
     def translate(self, current_hit, channel):
                     
         # Notice that we sort the dictionary by sequence numbers!
@@ -757,6 +693,9 @@ class event(object):
         
         # Assign by slicing directly into the amplitudes
         # OOO we can write torn offsets directly here
+        #     we can also write pedestalled offsets here directly
+        #     but then we need an explicit loop.  No idea
+        #     how much taht would slow things down.
         for offset, ampls in subhits:
             
             # DDD
@@ -784,6 +723,10 @@ class event(object):
         # All subhits are now in place in a mutable list.
                 
         # Are we pedestalling?  Do it now before we adjust the zero offset
+        #
+        # Pedestalling is required for any sort of analysis, so we do it
+        # very early in reconstruction
+        #
         if self.activePedestal:
             #print("Subtracting pedestals from data before taring...", file=sys.stderr)
             #amplitudes =
@@ -792,7 +735,11 @@ class event(object):
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
         # during the stop process
+
+        # First subhit, first stop sample
         p = subhits[0][0]
+
+        # Always right mask by this amount
         masklen = 5
 
         for i in range(0, masklen):
@@ -848,6 +795,7 @@ class event(object):
         # or unpacking bits into integers
         if self.chunks > 0:
 
+            # Use struct to rapidly convert
             tmp = doit.unpack(payload)
             # Populate the list
             # SLOW AS BALLS
@@ -862,6 +810,8 @@ class event(object):
             for i in range(0, len(payload)):
                 # Notice that we do an [i:i+1] slide, instead of an index.
                 # The index would return an integer, but the slice returns a bytes object with a single byte.
+
+                # bit packing is retarded and should never have even been thought of.
                 amplitudes = self.unpacker.unpack(payload[i:i+1])
                 for ampl in amplitudes:
                     tmp.append(ampl)
@@ -1202,6 +1152,9 @@ def intake(listen_tuple, eventQueue, args, processingHook=export): #dumpFile=Non
         args.file.close()
         print("\n(PID %d): Dump file closed." % pid, file=sys.stderr)
 
+    # Send a None event to signal that we have finished intake
+    processHook(None, eventQueue, args)
+    
     # Wait for the parent to join
     #eventQueue.close()
 #

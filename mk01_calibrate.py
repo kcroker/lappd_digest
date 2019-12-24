@@ -20,7 +20,6 @@ import time
 parser = lappdTool.create('Get calibration data from Eevee boards speaking protocol MK01.')
 
 # Custom args
-parser.add_argument('-p', '--pedestal', action="store_true", help='Take pedestals. (Automatically turns on -o)')
 parser.add_argument('-q', '--quiet', action="store_true", help='Do not dump anything to stdout.')
 parser.add_argument('-r', '--register', dest='registers', metavar='REGISTER', type=str, nargs=1, action='append', help='Peek and document the given register before intaking any events')
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Output amplitude-calibrated data (in volts)')
@@ -31,21 +30,6 @@ ifc, args, eventQueue = lappdTool.connect(parser)
 # Simple sanity check
 if args.i < 0:
     raise Exception("Interval must be positive")
-
-# If we are pedestalling, disable offset subtraction
-# so that we have absolute capacitor locations
-if args.pedestal:
-
-    # These conflict!
-    if args.subtract:
-        print("ERROR: You cannot subtract out a pedestal while taking a pedestal", file=sys.stderr)
-        exit(1)
-        
-    print("Disabling offset subtraction during pedestal run...", file=sys.stderr)
-    args.offset = True
-
-    print("Masking out 100 samples to the left of the stop sample...", file=sys.stderr)
-    args.mask = 100
     
 # Are we using an external trigger?  If so, kill the delay
 if args.external:
@@ -156,17 +140,7 @@ print("intakes() complete.", file=sys.stderr)
 # We're finished, so clean up the listeners
 # lappdTool.reap(intakeProcesses, args)
 
-# Should we build a pedestal with these events?
-if args.pedestal:
-
-    # BEETLEJUICE BEETLEJUICE BEETLEJUICE
-    activePedestal = lappdProtocol.pedestal(events)
-
-    # Write it out
-    if len(events) > 0:
-        pickle.dump(activePedestal, open("%s.pedestal" % events[0].board_id.hex(), "wb"))
-
-elif not args.quiet:
+if not args.quiet:
         
     for evt in events:
         # Output the result
