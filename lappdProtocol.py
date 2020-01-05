@@ -540,7 +540,7 @@ class event(object):
         self.activeTiming = activeTiming
         
         # When was I made (profiling debugging)
-        self.start = time.time()
+        #self.start = time.time()
         
         # Protocol encodes resolution at the event level
         # (Technically, its a channel property.)
@@ -805,7 +805,7 @@ def export(anevent, eventQueue, args):
     # Otherwise, do stuff
     # For profiling of event reconstruction and
     # queueing
-    anevent.finish = time.time()
+    #anevent.finish = time.time()
 
     # Very simple software thresholding
     passed = True
@@ -860,7 +860,7 @@ def export(anevent, eventQueue, args):
             # eventQueue.put(anevent.evt_number, block=False)
         else:
             # There's always a queue for controlling the processes
-            anevent.prequeue = time.time()
+            #anevent.prequeue = time.time()
             eventQueue.put(anevent, block=False)
 
     except queue.Full as e:
@@ -996,11 +996,15 @@ def intake(listen_tuple, eventQueue, args, processingHook): #dumpFile=None, keep
                                 if (maxEvents & 255) == 0:
 
                                     # Compute a rate if we can
-                                    if prevProcessingTime:
-                                        print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(currentEvents[tag].finish - prevProcessingTime)), file=sys.stderr)
-
+                                    now = time.time()
+                                    try:
+                                        if prevProcessingTime:
+                                            print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(now - prevProcessingTime)), file=sys.stderr)
+                                    except:
+                                        pass
+                                    
                                     # Record this event's time
-                                    prevProcessingTime = currentEvents[tag].finish
+                                    prevProcessingTime = now
 
                                     # Stop displaying weird negative events remaining
                                     if maxEvents > 0:
@@ -1072,11 +1076,15 @@ def intake(listen_tuple, eventQueue, args, processingHook): #dumpFile=None, keep
                                     if (maxEvents & 255) == 0:
 
                                         # Compute a rate if we can
-                                        if prevProcessingTime:
-                                            print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(currentEvents[tag].finish - prevProcessingTime)), file=sys.stderr)
-
+                                        now = time.time()
+                                        try:
+                                            if prevProcessingTime:
+                                                print("(PID %d): Approx. processing rate (Hz): %.2f" % (pid, 256/(now - prevProcessingTime)), file=sys.stderr)
+                                        except:
+                                            pass
+                                        
                                         # Record this event's time
-                                        prevProcessingTime = currentEvents[tag].finish
+                                        prevProcessingTime = now
 
                                         # Stop displaying weird negative events remaining
                                         if maxEvents > 0:

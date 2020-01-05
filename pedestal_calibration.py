@@ -86,6 +86,9 @@ def pedestalAccumulator(event, eventQueue, args):
         # Now its time to ship our results via IPC
         eventQueue.put((sums, sumsquares, counts))
 
+    # Flag that we finished
+    return True
+
 # This is the fork() point, so it needs to be inside the
 # script called.
 #
@@ -128,7 +131,7 @@ for proc in intakeProcesses:
     print("Received from child %d" % proc.pid, file=sys.stderr)
     
     # Accumulate into the first responder
-    if len(xij.keys()) == 0:
+    if len(sums.keys()) == 0:
         sums = pmeans
         sumsquares = psumsquares
         counts = pcounts
@@ -145,6 +148,7 @@ for proc in intakeProcesses:
 # full averages
 
 # Compute averages and the average squares
+import math
 for chan in sums.keys():
     for i in range(1024):
         # Make sure its an integer (so we can do fast integer subtraction when pedestalling raw ADC counts)
@@ -153,4 +157,4 @@ for chan in sums.keys():
     
 # Write out a binary timing file
 import pickle
-pickle.dump(lappdProtocol.pedestal(sums, sumsquares, counts), open("%s.pedestal" % board_id, "wb"))
+pickle.dump(lappdProtocol.pedestal(sums, sumsquares, counts), open("%s.pedestal" % (board_id if not args.listen else "anonymous"), "wb"))
