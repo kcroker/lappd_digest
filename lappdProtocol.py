@@ -45,10 +45,22 @@ event_fmt = "u16 r48 p8 u3 p5 u16 u16 u8 p8 u32 u32 p64"
 eventpacker = bitstruct.compile(event_fmt, ["magic", "board_id", "adc_bit_width", "evt_number", "evt_size", "num_hits", "trigger_timestamp_h", "trigger_timestamp_l"])
 globals()['EVT_MAGIC'] = 0x39ab
 
-# Hack to do things fast(er)?
-# yeah, way better
+#
+# NOT_DATA
+# --------------------
+# The maximum that can ever be stored is (2048 - 1) * 16: 32752
+# So we can store 32752 + 1.
+#   1) This will never occur in actual data
+#   2) Its still within the size of a signed short and is an integer (no need for heterogeneous lists)
+#   3) It can be easily found by (x & 1), which will always be zero for anything that comes from the device
+#
+globals()['NOT_DATA'] = ((2048 - 1) << 4) + 1
+
+# Make a bunch of very rapid parsers
 import struct
-doit = struct.Struct(">512h")
+doit = {}
+for i in range(1,513):
+    doit[i] = struct.Struct(">%dh" % i)
 
 #
 # Set a maximum payload size in bytes
@@ -56,7 +68,7 @@ doit = struct.Struct(">512h")
 ########################################
 
 # Force fragmentation (for generation only)
-globals()['LAPPD_MTU'] = 90
+globals()['LAPPD_MTU'] = 512
 
 class timing(object):
 
@@ -215,59 +227,16 @@ class timing(object):
             event.channels[chan] = tmp
 
 #
-# Utility class to compute pedestals from a list of events
+# Simple container object.
 #
 class pedestal(object):
 
-    def __init__(self, means, variances, counts):
+    def __init__(self, means, rmss, counts):
 
         # Set up for pedestals
         self.mean = means
-        self.variance = variances
+        self.rms = rmss
         self.counts = counts
-    #
-    # Return a pedestal subtracted list of amplitudes
-    #
-    def subtract(self, amplitudes, chan_id):
-        length = len(self.mean[chan_id])
-        for i in range(length):
-            amplitudes[i] -= self.mean[chan_id][i]
-
-    #
-    # Generate a test pedestal, with normally distributed event samples
-    #
-    def generatePedestal(resolution, chan_list, numsamples, scale):
-
-        import random
-
-        # Compute the maximum value pedestal in any channel for this set of events.
-        # Since this is for pedestals, we don't want the channel useless
-        # (a pedestal near saturation is useless)
-        #
-        # We set pedestals' offsets to be, at most 1/8 of the channel's dynamic range
-        maxy = 1 << ((1 << resolution) - 3) - 1
-
-        # Generate some random offsets
-        base_amplitudes = {}
-        for chan_id in chan_list:
-            base_amplitudes[chan_id] = [random.randrange(maxy) for i in range(0, numsamples)]
-
-        ampl_list = []
-        for chan_id, base in base_amplitudes.items():
-
-            # Make some new fluxes
-            flux = stats.norm.rvs(size=numsamples, scale=scale)
-
-            # Apply them to the base amplitudes
-            ampl_list.append([math.floor( base[i] + flux[i]*base[i] ) for i in range(0, numsamples)])
-
-        # Make a (zero-offsets) event that has these features
-        # Amplitude list for generateEvent() needs to be order preserving, or else the zip() will get the orders
-        # screwed up
-
-        #            print("Pedestal: %d channels, with %d samples each @ %d-bit" % (len(chan_list), numsamples, 1 << resolution), file=sys.stderr)
-        return lappd.event.generateEvent(555, resolution, chan_list, [0]*len(chan_list), ampl_list)
-
 
 # Define an event class
 class event(object):
@@ -688,8 +657,7 @@ class event(object):
         self.offsets[channel] = subhits[0][0]
 
         # Allocate space for the entire dero
-        # Store None's 
-        amplitudes = [None] * current_hit.max_samples
+        amplitudes = [NOT_DATA] * current_hit.max_samples
         
         # Assign by slicing directly into the amplitudes
         # OOO we can write torn offsets directly here
@@ -728,10 +696,9 @@ class event(object):
         # very early in reconstruction
         #
         if self.activePedestal:
-            #print("Subtracting pedestals from data before taring...", file=sys.stderr)
-            #amplitudes =
-            self.activePedestal.subtract(amplitudes, channel)
-            
+            for i in current_hit.max_samples:
+                amplitudes[i] -= self.activePedestal.mean[chan_id][i]
+
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
         # during the stop process
@@ -745,7 +712,7 @@ class event(object):
         for i in range(0, masklen):
 
             # Right mask
-            amplitudes[p + i] = None
+            amplitudes[p + i] = NOT_DATA
 
             if p + (i + 1) == current_hit.max_samples:
                 p = -(i + 1)
@@ -754,7 +721,7 @@ class event(object):
         for i in range(0, self.mask):
 
             # Left mask?
-            amplitudes[p - i] = None
+            amplitudes[p - i] = NOT_DATA
             
             if p - (i + 1) < 0:
                 p = current_hit.max_samples + i
@@ -796,7 +763,12 @@ class event(object):
         if self.chunks > 0:
 
             # Use struct to rapidly convert
-            tmp = doit.unpack(payload)
+            print("Length of payload: %d" % len(payload))
+
+            # This is only correct in the situation where we always receive
+            # 512 sample blocks...
+            
+            tmp = doit[len(payload)>>1].unpack(payload)
             # Populate the list
             # SLOW AS BALLS
             #tmp = [int.from_bytes(payload[i*self.chunks:(i+1)*self.chunks], byteorder='big', signed=True) for i in range(0, len(payload) >> (self.resolution - 3))]
@@ -841,7 +813,7 @@ def export(anevent, eventQueue, args):
         passed = False
         for channel in anevent.channels.values():
             for ampl in channel:
-                if not ampl is None and ampl > args.threshold:
+                if not (ampl & 1) and ampl > args.threshold:
                     passed = True
                     break
                 
@@ -908,7 +880,7 @@ def export(anevent, eventQueue, args):
 #   The default behaviour is lappdProtocol.export(...): apply any calibrations, and then ship the event
 #   via IPC or dump it to binary
 #
-def intake(listen_tuple, eventQueue, args, processingHook=export): #dumpFile=None, keep_offset=False, subtract=None):
+def intake(listen_tuple, eventQueue, args, processingHook): #dumpFile=None, keep_offset=False, subtract=None):
 
     # Who are we?
     pid = getpid()
@@ -1134,7 +1106,7 @@ def intake(listen_tuple, eventQueue, args, processingHook=export): #dumpFile=Non
             print("\n(PID %d): Caught SIGINT." % pid, file=sys.stderr)
 
             # Call the cleanup of the processHook
-            processHook(None, eventQueue, args)
+            processingHook(None, eventQueue, args)
             
             print("(PID %d): At death:\n\tOrphaned hits: %d\n\tIncomplete events: %d" % (pid, len(orphanedHits), len(currentEvents)), file=sys.stderr)
             print("(PID %d): Remaining number of events: %d" % (pid, maxEvents), file=sys.stderr)
@@ -1153,7 +1125,7 @@ def intake(listen_tuple, eventQueue, args, processingHook=export): #dumpFile=Non
         print("\n(PID %d): Dump file closed." % pid, file=sys.stderr)
 
     # Send a None event to signal that we have finished intake
-    processHook(None, eventQueue, args)
+    processingHook(None, eventQueue, args)
     
     # Wait for the parent to join
     #eventQueue.close()
@@ -1209,7 +1181,7 @@ def incom(event):
         # Overwrite it
         # 8 pad bytes, 4 pad shorts
         complete += [0]*4
-        complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
+        complete += [ampl + ((1<<15) - 1) if not (ampl & 1) else (1 << 16) - 1 for ampl in ampls]
     
     # Write event header garbage
     sys.stdout.buffer.write(b'\x01'*(6*4))
@@ -1238,7 +1210,7 @@ def incom(event):
         
         # Overwrite it
         complete += [0]*4
-        complete += [ampl + ((1<<15) - 1) if not ampl is None else (1 << 16) - 1 for ampl in ampls]
+        complete += [ampl + ((1<<15) - 1) if not (ampl & 1) else (1 << 16) - 1 for ampl in ampls]
 
     # This is board header garbage
     sys.stdout.buffer.write(b'\x02'*(2*4))
@@ -1255,7 +1227,7 @@ def dump(event):
     print("# event number = %d\n# y_max = %d" % (event.evt_number, (1 << ((1 << event.resolution) - 1)) - 1))
 
     # A quick formatter
-    fmt = lambda x : float('nan') if x is None else x
+    #fmt = lambda x : float('nan') if x is None else x
 
     # See if we have tuples, or just a raw list
     chans = list(event.channels.keys())
@@ -1266,14 +1238,14 @@ def dump(event):
             print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
 
             for n, ampl in enumerate(amplitudes):
-                print("%d %e %d" % (n, fmt(ampl), channel))
+                print("%d %d %d" % (n, ampl, channel))
             print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
     else:
         for channel, amplitudes in event.channels.items():
             print("# BEGIN CHANNEL %d\n# drs4_offset: %d" % (channel, event.offsets[channel]))
 
             for t, ampl in amplitudes:
-                print("%e %e %d" % (t, fmt(ampl), channel))
+                print("%e %e %d" % (t, ampl, channel))
             print("# END OF CHANNEL %d (EVENT %d)" % (channel, event.evt_number))
    
             

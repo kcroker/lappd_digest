@@ -117,7 +117,7 @@ def timingAccumulator(event, eventQueue, args):
             # First, apply the gain correction (since we don't usually care enough about this elsewhere)
             if args.gain:
                 for i in range(1024):
-                    if not evt.channels[chan][i] is None:
+                    if not evt.channels[chan][i] & 1:
                         # We multiply by 1000 to put things into milivolts
                         #
                         # XXX we should do this at computation of the gain calibration....
@@ -127,13 +127,13 @@ def timingAccumulator(event, eventQueue, args):
             # Go through the waveforms, stashing the squares already
 
             for i in range(1023):
-                if not evt.channels[chan][i] is None and not evt.channels[chan][i+1] is None:
+                if not (evt.channels[chan][i] & 1) and not (evt.channels[chan][i+1] & 1):
                     xij[chan][i] += (evt.channels[chan][i] + evt.channels[chan][i+1])**2
                     yij[chan][i] += (evt.channels[chan][i] - evt.channels[chan][i+1])**2
                     counts[chan][i] += 1
 
             # Don't forget the reach around
-            if not evt.channels[chan][1023] is None and not evt.channels[chan][0] is None:
+            if not (evt.channels[chan][1023] & 1) and not (evt.channels[chan][0] & 1):
                 xij[chan][1023] += (evt.channels[chan][1023] + evt.channels[chan][0])**2
                 yij[chan][1023] += (evt.channels[chan][1023] - evt.channels[chan][0])**2
                 counts[chan][1023] += 1

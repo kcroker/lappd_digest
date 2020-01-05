@@ -18,7 +18,7 @@ parser.add_argument('-s', '--subtract', metavar='PEDESTAL_FILE', type=str, help=
 parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Time calibration to apply to pickled events -calibrated (results in seconds)')
 parser.add_argument('-g', '--gain', metavar='GAIN_FILE', type=str, help='Gain calibration to apply to pickled events.')
 parser.add_argument('-d', '--dump', action='store_true', help='Dump the calibrated events to stdout. (works only with 1 thread!)')
-
+parser.add_argument('-r', '--remove', action='store_true', help='Remove any None types in the data and replace with the integer lappdProtocol.NOT_DATA')
 parser.add_argument('--incom', action='store_true', help='Dump in Incom format')
 
 # Get dem args
@@ -57,6 +57,8 @@ from os import getpid
 # Entry point for children
 def calibrate(assignments, eventQueue, args):
 
+    pid = os.getpid()
+    
     # Load the relevant calibrations
     pedestalCal = None
     if args.subtract:
@@ -74,7 +76,7 @@ def calibrate(assignments, eventQueue, args):
 
         # Load the specific file
         f = open(task, "rb")
-        print("Processing %s..." % task, file=sys.stderr)
+        print("(PID %d): Processing %s..." % (pid, task), file=sys.stderr)
 
         # Open the destination, we will write on the fly
         if not args.dump:
@@ -90,6 +92,14 @@ def calibrate(assignments, eventQueue, args):
                 # Get the channels present in this file's events
                 chans = e.channels.keys()
 
+                # Denoneing?
+                if args.removeNones:
+                    for chan in chans:
+                        for i in range(len(e.channels[chan])):
+                            if e.channels[chan][i] is None:
+                                # Replace the None with the NOT_DATA integer
+                                e.channels[chan][i] = lappdProtocol.NOT_DATA
+                        
                 # Remove the pedestal
                 if pedestalCal:
                     for chan in chans:
@@ -97,14 +107,14 @@ def calibrate(assignments, eventQueue, args):
                         # We need to do it manually here because there are usually None's present
                         # after the fact...
                         for i in range(len(e.channels[chan])):
-                            if not e.channels[chan][i] is None:
+                            if not (e.channels[chan][i] & 1):
                                 e.channels[chan][i] -= pedestalCal.mean[chan][i]
                                 
                 # Now apply gains
                 if gainCal:
                     for chan in chans:
                         for i in range(1024):
-                            if e.channels[chan][i] is None:
+                            if e.channels[chan][i] & 1:
                                 continue
 
                             # XXX This is hardcoded and lacks sophistication
@@ -136,7 +146,7 @@ def calibrate(assignments, eventQueue, args):
 
                 # Print out a message every 256 events
                 if (q & 255) == 0:
-                    print("Processed %d events" % q, file=sys.stderr)
+                    print("(PID %d): Processed %d events" % (pid, q), file=sys.stderr)
 
                 # Keep track
                 q += 1
@@ -147,7 +157,7 @@ def calibrate(assignments, eventQueue, args):
             
         # Close out the calibrated file
         if not args.dump:
-            print("DONE: calibrated_%s written" % file, file=sys.stderr)
+            print("(PID %d): Done. Calibrated_%s written" % (pid, file), file=sys.stderr)
             dest.close()
         
 # Fork a bunch of children that will handle sublists

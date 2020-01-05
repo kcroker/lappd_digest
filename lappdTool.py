@@ -36,7 +36,7 @@ def create(leader):
     parser.add_argument('-t', '--timing', metavar='TIMING_FILE', type=str, help='Output time-calibrated data (in seconds)')
 
     parser.add_argument('-b', '--threshold', metavar='THRESHOLD', type=int, help='Discard events with ADC count amplitude below this threshold value')
-    parser.add_argument('-l', '--listen', metavar='LISTEN_IP', type=str, default="0.0.0.0", help='Do not attempt to talk to any boards, instead just passively listen for data')
+    parser.add_argument('-l', '--listen', action='store_true', help='Do not attempt to talk to any boards, instead just passively listen for data')
     
     # At these values, unbuffered TCAL does not
     # have the periodic pulse artifact (@ CMOFS 0.8)
@@ -80,6 +80,9 @@ def connect(parser):
     if args.listen:
         if not args.external:
             raise Exception("Listening only makes sense in external triggering mode")
+
+        # Listen everywhere
+        args.listen = args.board
     else:
             
         # Connect to the board
@@ -161,7 +164,7 @@ def disableTCAL(ifc):
 # This will spawn a bunch of listener processes
 # and return when they are ready
 #
-def spawn(args, eventQueue):
+def spawn(args, eventQueue, processingHook=None):
 
     # Short circuit if we aren't trying to get any packets
     if not args.N:
@@ -174,7 +177,7 @@ def spawn(args, eventQueue):
     intakeProcesses = [None]*args.threads
 
     for i in range(0, args.threads):
-        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args))
+        intakeProcesses[i] = multiprocessing.Process(target=intake, args=((args.listen, args.aim+i), eventQueue, args, processingHook))
         intakeProcesses[i].start()
 
         # Pin the processes

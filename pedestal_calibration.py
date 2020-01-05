@@ -26,37 +26,12 @@ args.offset = True
 
 print("Masking out 100 samples to the left of the stop sample...", file=sys.stderr)
 args.mask = 100
-
-# Turn off external respose
-lappdTool.externalOff()
     
 # Save the number of samples we demand
 Nsamples = args.N
 
 # Set args.N = -1, so we keep listening indefinitely
 args.N = -1
-
-# Get an event
-ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
-
-# Wait for the event
-evt = eventQueue.get()
-
-# Get board id
-board_id = evt.board_id.hex()
-
-# Get board active channels
-chans = evt.channels.keys()
-
-# This is the fork() point, so it needs to be inside the
-# script called.
-#
-# This has to be done after setting things, so if we are hardware
-# triggering, its okay.
-if __name__ == "__main__":
-    intakeProcesses = lappdTool.spawn(args, eventQueue, pedestalAccumulator)
-
-############## COMMON TOOL INITIALIZATION END ##############
 
 #
 # This is called from another process, so it always runs
@@ -68,70 +43,62 @@ if __name__ == "__main__":
 #
 # Each process will have its own copy of these variables.
 #
-means = {}
-variances = {}
+sums = {}
+sumsquares = {}
 counts = {}
 
-for chan in chans:
-    # Initialize the pairs list
-    means[chan] = [0 for x in range(1024)]
-    variances[chan] = [0.0 for x in range(1024)]
-    
-    # Initialize the count of tabulated samples
-    counts[chan] = [0 for i in range(1024)]
+chans = None
 
 #
-# This will use IPC in two stages:
-#   1) computes the sum of the values
-#   2) ships it and waits for the total average to come in
-#   3) uses this to compute the sum (x_i - x_\bar)**2
-#   4) ships it
-#
 # In this way, huge lists of event data never need to be shippped via IPC
+# The callback must be defined above its use in the intake() as a hook, because Python.
 #
 def pedestalAccumulator(event, eventQueue, args):
 
+    global chans
+    
     # If we're not None, then we should accumulate
     if event:
+
+        # If this is the first event, do some initialization on our end
+        if not chans:
+            chans = event.channels.keys()
+
+            for chan in chans:
+                # Initialize the pairs list
+                sums[chan] = [0 for x in range(1024)]
+                sumsquares[chan] = [0 for x in range(1024)]
+                rmss[chan] = [0.0 for x in range(1024)]
+
+                # Initialize the count of tabulated samples
+                counts[chan] = [0 for i in range(1024)]
+
         # Process it right here.
         for chan in event.channels.keys():
             for i in range(1024):
 
                 # If its not none, accumulate it
-                if event.channels[chan][i]:
-                    means[chan][i] += event.channels[chan][i]
+                if not event.channels[chan][i] & 1:
+                    sums[chan][i] += event.channels[chan][i]
+                    sumsquares[chan][i] += event.channels[chan][i]**2
                     counts[chan] += 1
     else:
         # Okay, now its processing time
         
         # Now its time to ship our results via IPC
-        eventQueue.put((mean, None, counts))
+        eventQueue.put((sums, sumsquares, counts))
 
-        # Wait for all the other children to submit sums
-        # and the parent to consume them
-        eventQueue.join()
+# This is the fork() point, so it needs to be inside the
+# script called.
+#
+# This has to be done after setting things, so if we are hardware
+# triggering, its okay.
+#
+if __name__ == "__main__":
+    intakeProcesses = lappdTool.spawn(args, eventQueue, pedestalAccumulator)
 
-        # Wait for the total averages
-        avgs = eventQueue.get()
-
-        # Now make sums of squares
-        for chan in event.channels.keys():
-
-            # Note that counts will be unchanged!
-            for i in range(1024):
-
-                # If its not none, use it
-                if event.channels[chan][i]:
-
-                    # This should be an integer, because the averages will be rounded to
-                    # the nearest integer (since this is in the noise anyway)
-                    variances[chan] += (avgs[chan][i] - event.channels[chan][i])**2
-
-        # Now ship the variances
-        # (parent already has the means and the counts)
-        eventQueue.put((None, variances, None))
-    
-    
+############## COMMON TOOL INITIALIZATION END ##############
+        
 #
 # Now populate them
 #
@@ -158,20 +125,18 @@ if not args.external:
 for proc in intakeProcesses:
 
     # Get the partial data
-    pmeans, pvariances, pcounts = eventQueue.get()
+    pmeans, psumsquares, pcounts = eventQueue.get()
 
     # Accumulate into the first responder
     if len(xij.keys()) == 0:
-        means = pmeans
-        if pvariances:
-            raise Exception("ERROR: Received non-None variance before computing means.  IPC broken")
-
+        sums = pmeans
+        sumsquares = psumsquares
         counts = pcounts
     else:
         for chan in means.keys():
             for i in range(1024):
-                means[chan][i] += pmeans[chan][i]
-                counts[chan][i] += pcounts[chan][i]
+                sums[chan][i] += psums[chan][i]
+                sumsquares[chan][i] += psumsquares[chan][i]
 
     # Signal that we got it
     eventQueue.task_done()
@@ -179,39 +144,13 @@ for proc in intakeProcesses:
 # We've received all partial means, and all children are waiting for us to ship args.threads number of
 # full averages
 
-# Compute averages
-for chan in means.keys():
+# Compute averages and the average squares
+for chan in sums.keys():
     for i in range(1024):
-        # Make sure its an integer
-        means[chan][i] = round(means[chan][i]/counts[chan][i])
-
-# Ship them back
-for proc in intakeProcesses:
-    eventQueue.put(means)
-
-# Wait for the children to finish
-for proc in intakeProcesses:
-    pmeans, pvariances, pcounts = eventQueue.get()
-
-    if len(variances.keys()) == 0:
-        variances = pvariances
-        
-        if pmeans or pcounts:
-            raise Exception("ERROR: Received non-None means and counts before computing variances.  IPC broken")
-    else:
-        for chan in variances.keys():
-            for i in range(1024):
-                variances[chan][i] += pvariances[chan][i]
-
-    # Signal that we got it
-    eventQueue.task_done()
-
-# Now compute the final variances
-for chan in means.keys():
-    for i in range(1024):
-        # Make sure its an integer
-        variances[chan][i] = round(variances[chan][i]/counts[chan][i])
-
+        # Make sure its an integer (so we can do fast integer subtraction when pedestalling raw ADC counts)
+        sums[chan][i] = round(sums[chan][i]/counts[chan][i])
+        sumsquares[chan][i] = math.sqrt(sumsquares[chan][i]/counts[chan][i] - sums[chan][i]**2)
+    
 # Write out a binary timing file
 import pickle
-pickle.dump(lappdProtocol.pedestal(means, variances, counts), open("%s.pedestal" % board_id, "wb"))
+pickle.dump(lappdProtocol.pedestal(sums, sumsquares, counts), open("%s.pedestal" % board_id, "wb"))
