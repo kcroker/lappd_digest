@@ -30,9 +30,6 @@ args.mask = 100
 # Save the number of samples we demand
 Nsamples = args.N
 
-# Set args.N = -1, so we keep listening indefinitely
-args.N = -1
-
 #
 # This is called from another process, so it always runs
 # in the child process.
@@ -45,6 +42,7 @@ args.N = -1
 #
 sums = {}
 sumsquares = {}
+rmss = {}
 counts = {}
 
 chans = None
@@ -56,14 +54,14 @@ chans = None
 def pedestalAccumulator(event, eventQueue, args):
 
     global chans
-    
+            
     # If we're not None, then we should accumulate
     if event:
 
         # If this is the first event, do some initialization on our end
-        if not chans:
+        if chans is None:
             chans = event.channels.keys()
-
+            
             for chan in chans:
                 # Initialize the pairs list
                 sums[chan] = [0 for x in range(1024)]
@@ -78,10 +76,10 @@ def pedestalAccumulator(event, eventQueue, args):
             for i in range(1024):
 
                 # If its not none, accumulate it
-                if not event.channels[chan][i] & 1:
+                if not event.channels[chan][i] == lappdProtocol.NOT_DATA:
                     sums[chan][i] += event.channels[chan][i]
                     sumsquares[chan][i] += event.channels[chan][i]**2
-                    counts[chan] += 1
+                    counts[chan][i] += 1
     else:
         # Okay, now its processing time
         
@@ -127,6 +125,8 @@ for proc in intakeProcesses:
     # Get the partial data
     pmeans, psumsquares, pcounts = eventQueue.get()
 
+    print("Received from child %d" % proc.pid, file=sys.stderr)
+    
     # Accumulate into the first responder
     if len(xij.keys()) == 0:
         sums = pmeans

@@ -38,6 +38,7 @@ def replay(assignments, eventQueue, args, port):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect((socket.gethostbyname(args.address), port))
 
+    N = 0
     for task in assignments:
 
         # Load the specific file
@@ -60,18 +61,18 @@ def replay(assignments, eventQueue, args, port):
                 # Ugh.  Places where there are None's in the data need to be chunked off into subhits
                 
                 for chan,ampls in e.channels.items():
-                    print("Offset: %d" % e.offsets[chan])
-                    print(ampls)
+                    #print("Offset: %d" % e.offsets[chan], file=sys.stderr)
+                    #                   print(ampls)
                     channel_subhits = []
                     subhit = []
                     offset = e.offsets[chan]
                     
-                    for ampl in ampls:
-                        if not (ampl & 1):
+                    for n, ampl in enumerate(ampls):
+                        if not ampl == lappdProtocol.NOT_DATA:
                             subhit.append(ampl)
                         else:
                             # We hit a none, terminate this subhit and adjust the offset
-                            print("Hit NOT_DATA")
+                            # print("NOT_DATA: chan %d, amplitude %d, value %d" % (chan, n, ampl), file=sys.stderr)
                             if len(subhit) > 0:
                                 # Add this one
                                 channel_subhits.append((offset, subhit))
@@ -99,7 +100,14 @@ def replay(assignments, eventQueue, args, port):
                 # Write it out
                 for packet in rawpackets:
                     s.send(packet)
-                
+
+                # Increment couny
+                N += 1
+
+                # Output some status
+                if (N & 255) == 0:
+                    print("(PID %d): replayed %d events" % (pid, N), file=sys.stderr)
+                    
             except EOFError as e:
                             
                 # Leave the while loop

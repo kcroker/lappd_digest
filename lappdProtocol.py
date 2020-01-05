@@ -68,7 +68,7 @@ for i in range(1,513):
 ########################################
 
 # Force fragmentation (for generation only)
-globals()['LAPPD_MTU'] = 512
+globals()['LAPPD_MTU'] = 1024
 
 class timing(object):
 
@@ -763,7 +763,7 @@ class event(object):
         if self.chunks > 0:
 
             # Use struct to rapidly convert
-            print("Length of payload: %d" % len(payload))
+            # print("Length of payload: %d" % len(payload))
 
             # This is only correct in the situation where we always receive
             # 512 sample blocks...
@@ -813,7 +813,7 @@ def export(anevent, eventQueue, args):
         passed = False
         for channel in anevent.channels.values():
             for ampl in channel:
-                if not (ampl & 1) and ampl > args.threshold:
+                if not ampl == NOT_DATA and ampl > args.threshold:
                     passed = True
                     break
                 
@@ -941,7 +941,7 @@ def intake(listen_tuple, eventQueue, args, processingHook): #dumpFile=None, keep
             # (and wait until things come in)
             # UDP semantics just pops whatever is there off of the packet stack
             #print("Waiting for packets at %s:%d..." % listen_tuple, file=sys.stderr)
-            data, addr = s.recvfrom(1500)
+            data, addr = s.recvfrom(1526)
             #print("Packet received from %s:%d!" % addr, file=sys.stderr)
 
             #
@@ -1181,7 +1181,7 @@ def incom(event):
         # Overwrite it
         # 8 pad bytes, 4 pad shorts
         complete += [0]*4
-        complete += [ampl + ((1<<15) - 1) if not (ampl & 1) else (1 << 16) - 1 for ampl in ampls]
+        complete += [ampl + ((1<<15) - 1) if not ampl == NOT_DATA else (1 << 16) - 1 for ampl in ampls]
     
     # Write event header garbage
     sys.stdout.buffer.write(b'\x01'*(6*4))
@@ -1210,7 +1210,7 @@ def incom(event):
         
         # Overwrite it
         complete += [0]*4
-        complete += [ampl + ((1<<15) - 1) if not (ampl & 1) else (1 << 16) - 1 for ampl in ampls]
+        complete += [ampl + ((1<<15) - 1) if not ampl == NOT_DATA else (1 << 16) - 1 for ampl in ampls]
 
     # This is board header garbage
     sys.stdout.buffer.write(b'\x02'*(2*4))

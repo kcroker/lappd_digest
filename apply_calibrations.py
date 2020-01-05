@@ -4,6 +4,7 @@ import argparse
 import math
 import pickle
 import sys
+import os
 
 import lappdProtocol
 
@@ -93,7 +94,7 @@ def calibrate(assignments, eventQueue, args):
                 chans = e.channels.keys()
 
                 # Denoneing?
-                if args.removeNones:
+                if args.remove:
                     for chan in chans:
                         for i in range(len(e.channels[chan])):
                             if e.channels[chan][i] is None:
@@ -107,14 +108,14 @@ def calibrate(assignments, eventQueue, args):
                         # We need to do it manually here because there are usually None's present
                         # after the fact...
                         for i in range(len(e.channels[chan])):
-                            if not (e.channels[chan][i] & 1):
+                            if not e.channels[chan][i] == lappdProtocol.NOT_DATA:
                                 e.channels[chan][i] -= pedestalCal.mean[chan][i]
                                 
                 # Now apply gains
                 if gainCal:
                     for chan in chans:
                         for i in range(1024):
-                            if e.channels[chan][i] & 1:
+                            if e.channels[chan][i] == lappdProtocol.NOT_DATA:
                                 continue
 
                             # XXX This is hardcoded and lacks sophistication
