@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import sys
 import lappdProtocol
+import time
 
 parser = parser = argparse.ArgumentParser(description='Replay binary files as if they were coming from a board')
 parser.add_argument('files', metavar="FILES", type=str, help="The files to calibrate", nargs='+')
@@ -105,8 +106,19 @@ def replay(assignments, eventQueue, args, port):
                 N += 1
 
                 # Output some status
-                if (N & 255) == 0:
+                if (N & 255 == 0):
                     print("(PID %d): replayed %d events" % (pid, N), file=sys.stderr)
+
+                    # Compute a rate if we can
+                    now = time.time()
+                    try:
+                        if prevProcessingTime:
+                            print("(PID %d): Approx. replay rate (Hz): %.2f" % (pid, 256/(now - prevProcessingTime)), file=sys.stderr)
+                    except:
+                        pass
+
+                    # Record this event's time
+                    prevProcessingTime = now
                     
             except EOFError as e:
                             

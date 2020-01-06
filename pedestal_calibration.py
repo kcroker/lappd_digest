@@ -27,9 +27,6 @@ args.offset = True
 print("Masking out 100 samples to the left of the stop sample...", file=sys.stderr)
 args.mask = 100
     
-# Save the number of samples we demand
-Nsamples = args.N
-
 #
 # This is called from another process, so it always runs
 # in the child process.
@@ -110,7 +107,7 @@ if __name__ == "__main__":
 # soft triggers has been sent.
 #
 if not args.external:
-    for k in range(0, Nsamples):
+    for k in range(0, args.N):
 
         # Wait for it to settle
         time.sleep(args.i)

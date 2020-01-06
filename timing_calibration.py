@@ -20,9 +20,6 @@ parser.add_argument('-D', '--deltas', metavar='CHIP_DELTAS_FILE', help='Input ex
 # Handle common configuration due to the common arguments
 ifc, args, eventQueue = lappdTool.connect(parser)
 
-# Turn off external respose
-lappdTool.externalOff()
-
 # Die if no pedestal is given
 if not args.subtract:
     print("ERROR: You must provide a pedestal in order to perform timing calibration", file=sys.stderr)
@@ -31,26 +28,31 @@ if not args.subtract:
 # Force capacitor ordering
 args.offset = True
 
-# Save the number of samples we demand
-Nsamples = args.N
+if not args.listen:
+    
+    # Enable the sin
+    ifc.DrsTimeCalibOscOn()
 
-# Set args.N = -1, so we keep listening indefinitely
-args.N = -1
+    # Sleep a bit
+    print("Sleeping for 100ms second to allow the calibration to get smooth...", file=sys.stderr)
+    time.sleep(0.1)
 
-# Enable the sin
-ifc.DrsTimeCalibOscOn()
+    # Save previous ones
+    masklow = ifc.brd.peeknow(0x670)
+    maskhigh = ifc.brd.peeknow(0x674)
 
-# Sleep a bit
-print("Sleeping for 100ms second to allow the calibration to get smooth...", file=sys.stderr)
-time.sleep(0.1)
+    # Set new ones
+    ifc.brd.pokenow(0x670, 0x00008000)
+    ifc.brd.pokenow(0x674, 0x00800000)
 
-# Save previous ones
-masklow = ifc.brd.peeknow(0x670)
-maskhigh = ifc.brd.peeknow(0x674)
+    # Get an event
+    ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
 
-# Set new ones
-ifc.brd.pokenow(0x670, 0x00008000)
-ifc.brd.pokenow(0x674, 0x00800000)
+    # Wait for the event
+    evt = eventQueue.get()
+
+    # Get board id
+    board_id = evt.board_id.hex()
 
 # Load the gain correction?
 gainCorrection = None
@@ -58,26 +60,6 @@ if args.gain:
     import pickle
     gainCorrection = pickle.load(open(args.gain, "rb"))
     print("Using gain file %s" % args.gain, file=sys.stderr)
-
-# Get an event
-ifc.brd.pokenow(0x320, 1 << 6, readback=False, silent=True)
-
-# Wait for the event
-evt = eventQueue.get()
-
-# Get board id
-board_id = evt.board_id.hex()
-
-# Get board active channels
-chans = evt.channels.keys()
-
-# This is the fork() point, so it needs to be inside the
-# script called.
-#
-# This has to be done after setting things, so if we are hardware
-# triggering, its okay.
-if __name__ == "__main__":
-    intakeProcesses = lappdTool.spawn(args, eventQueue, timingAccumulator)
 
 ############## COMMON TOOL INITIALIZATION END ##############
 
@@ -95,13 +77,7 @@ xij = {}
 yij = {}
 counts = {}
 
-for chan in chans:
-    # Initialize the pairs list
-    xij[chan] = [0 for x in range(1024)]
-    yij[chan] = [0 for y in range(1024)]
-
-    # Initialize the count of tabulated samples
-    counts[chan] = [0 for i in range(1024)]
+chans = None
 
 #
 # This hook gets called after an entire event is reassembled.
@@ -110,36 +86,62 @@ for chan in chans:
 #
 def timingAccumulator(event, eventQueue, args):
 
+    global chans
+    
     # If we're not None, then we should accumulate
     if event:
+
+        if chans is None:
+
+            chans = event.channels.keys()
+            
+            for chan in chans:
+                # Initialize the pairs list
+                xij[chan] = [0 for x in range(1024)]
+                yij[chan] = [0 for y in range(1024)]
+                
+                # Initialize the count of tabulated samples
+                counts[chan] = [0 for i in range(1024)]
+
         # Process it right here.
         for chan in event.channels.keys():
             # First, apply the gain correction (since we don't usually care enough about this elsewhere)
             if args.gain:
                 for i in range(1024):
-                    if not evt.channels[chan][i] == lappdProtocol.NOT_DATA:
+                    if not event.channels[chan][i] == lappdProtocol.NOT_DATA:
                         # We multiply by 1000 to put things into milivolts
                         #
                         # XXX we should do this at computation of the gain calibration....
-                        evt.channels[chan][i] *= args.gain[chan][i][0] * 1000
-                #print("Gains corrected for event number %d" % evt.evt_number, file=sys.stderr)
+                        event.channels[chan][i] *= args.gain[chan][i][0] * 1000
+                #print("Gains corrected for event number %d" % event.event_number, file=sys.stderr)
 
             # Go through the waveforms, stashing the squares already
 
             for i in range(1023):
-                if not (evt.channels[chan][i] == lappdProtocol.NOT_DATA) and not (evt.channels[chan][i+1] == lappdProtocol.NOT_DATA):
-                    xij[chan][i] += (evt.channels[chan][i] + evt.channels[chan][i+1])**2
-                    yij[chan][i] += (evt.channels[chan][i] - evt.channels[chan][i+1])**2
+                if not (event.channels[chan][i] == lappdProtocol.NOT_DATA) and not (event.channels[chan][i+1] == lappdProtocol.NOT_DATA):
+                    xij[chan][i] += (event.channels[chan][i] + event.channels[chan][i+1])**2
+                    yij[chan][i] += (event.channels[chan][i] - event.channels[chan][i+1])**2
                     counts[chan][i] += 1
 
             # Don't forget the reach around
-            if not (evt.channels[chan][1023] == lappdProtocol.NOT_DATA) and not (evt.channels[chan][0] == lappdProtocol.NOT_DATA):
-                xij[chan][1023] += (evt.channels[chan][1023] + evt.channels[chan][0])**2
-                yij[chan][1023] += (evt.channels[chan][1023] - evt.channels[chan][0])**2
+            if not (event.channels[chan][1023] == lappdProtocol.NOT_DATA) and not (event.channels[chan][0] == lappdProtocol.NOT_DATA):
+                xij[chan][1023] += (event.channels[chan][1023] + event.channels[chan][0])**2
+                yij[chan][1023] += (event.channels[chan][1023] - event.channels[chan][0])**2
                 counts[chan][1023] += 1
     else:
         # Now its time to ship our results via IPC
         eventQueue.put((xij, yij, counts))
+
+    # Return true, so that intake() knows we succeeded
+    return True
+
+# This is the fork() point, so it needs to be inside the
+# script called.
+#
+# This has to be done after setting things, so if we are hardware
+# triggering, its okay.
+if __name__ == "__main__":
+    intakeProcesses = lappdTool.spawn(args, eventQueue, timingAccumulator)
 
 #
 # Now populate them
@@ -151,7 +153,7 @@ def timingAccumulator(event, eventQueue, args):
 # soft triggers has been sent.
 #
 if not args.external:
-    for k in range(0, Nsamples):
+    for k in range(0, args.N):
 
         # Wait for it to settle
         time.sleep(args.i)
@@ -183,12 +185,13 @@ for proc in intakeProcesses:
     # Signal that we got it
     eventQueue.task_done()
 
-# Restore old channel masks
-ifc.brd.pokenow(0x670, masklow)
-ifc.brd.pokenow(0x674, maskhigh)
+if not args.listen:
+    # Restore old channel masks
+    ifc.brd.pokenow(0x670, masklow)
+    ifc.brd.pokenow(0x674, maskhigh)
 
-# Turn off calibration 
-ifc.RegSetBit(lappdIfc.MODE, lappdIfc.C_MODE_TCA_ENA_BIT, 0)  
+    # Turn off calibration 
+    ifc.RegSetBit(lappdIfc.MODE, lappdIfc.C_MODE_TCA_ENA_BIT, 0)  
 
 # Nw do the analysis
 # from scipy.stats import describe
@@ -198,8 +201,8 @@ for chan in xij.keys():
     # Okay, now compute the averages
     for i in range(1024):
 
-        xij[chan][i] = float(xij[chan][i]/counts[chan][i])
-        yij[chan][i] = float(yij[chan][i]/counts[chan][i])
+        xij[chan][i] = xij[chan][i]/counts[chan][i]
+        yij[chan][i] = yij[chan][i]/counts[chan][i]
 
         #
         # Assuming the integral average is a good approximation for this sample...
@@ -237,4 +240,4 @@ for i in range(55-8, 56):
 
 # Write out a binary timing file
 import pickle
-pickle.dump(lappdProtocol.timing(chanmap, xij, reference, deltat_chip), open("%s.timing" % board_id, "wb"))
+pickle.dump(lappdProtocol.timing(chanmap, xij, reference, deltat_chip), open("%s.timing" % (board_id if not args.listen else "anonymous"), "wb"))

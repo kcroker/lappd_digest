@@ -696,8 +696,8 @@ class event(object):
         # very early in reconstruction
         #
         if self.activePedestal:
-            for i in current_hit.max_samples:
-                amplitudes[i] -= self.activePedestal.mean[chan_id][i]
+            for i in range(current_hit.max_samples):
+                amplitudes[i] -= self.activePedestal.mean[channel][i]
 
         # Mask out the naughty ones to the left of stop.
         # This is because stop is t_max, and things get munged
