@@ -126,21 +126,22 @@ if not args.external:
 for proc in intakeProcesses:
 
     # Get the partial data
-    pmeans, psumsquares, pcounts = eventQueue.get()
+    psums, psumsquares, pcounts = eventQueue.get()
 
     print("Received from child %d" % proc.pid, file=sys.stderr)
     
     # Accumulate into the first responder
     if len(sums.keys()) == 0:
-        sums = pmeans
+        sums = psums
         sumsquares = psumsquares
         counts = pcounts
     else:
-        for chan in means.keys():
+        for chan in sums.keys():
             for i in range(1024):
                 sums[chan][i] += psums[chan][i]
                 sumsquares[chan][i] += psumsquares[chan][i]
-
+                counts[chan][i] += pcounts[chan][i]
+                
     # Signal that we got it
     eventQueue.task_done()
 
