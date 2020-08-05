@@ -28,9 +28,9 @@ fullPeds = []
 for chan in aPedestal.mean:
     for i, ped in enumerate(aPedestal.mean[chan]):
 
-        # Pedestals are stored with an extra nibble of zero
-        # so take this off (since the native format requires it)
-        fullPeds.append( (chan, i, ped >> 4) )
+        # Values are stored as signed 16 bit integers.
+        # Upload needs to be signed 12 bit integers.
+        fullPeds.append( (chan, i, ((ped + (1 << 15)) >> 4) - (1 >> 11)) )
 
 print("Pedestal list flattened.")
 
