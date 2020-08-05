@@ -82,15 +82,29 @@ C_MODE_TCA_ENA_BIT      = 3  # enable time calibration oscillator
 C_MODE_EB_FRDISABLE_BIT = 4  # disable packet fragmentation
 C_MODE_EXTTRG_EN_BIT    = 5  # enable external trigger
 C_MODE_DRS_REVRS_BIT    = 6  # reverse order of Drs stop samples 
+C_MODE_CLKIN_TRG_BIT    = 7  # use CLKIN for the trigger input
+C_MODE_PEDSUB_EN_BIT    = 8  # enable pedestal subtraction
+C_MODE_ZERSUP_EN_BIT    = 9  # enable zero supression
 
+# Old mapping
+# ADDR_DAC_OFFSET = 0x1000
+# ADDR_ADCSPI_OFFSET = 0x2000
+# ADDR_ADCBUF_OFFSET = 0x3000 
+# ADDR_DRSCFG_OFFSET = 0x4000
+# ADDR_PEDMEM_OFFSET = 0x5000
 
+ADDR_DAC_OFFSET    = (1 << 18) # DAC
+ADDR_ADCSPI_OFFSET = (2 << 18) # ADC SPI control
+ADDR_ADCBUF_OFFSET = (3 << 18) # ADC buffer reg interface
+ADDR_DRSCFG_OFFSET = (4 << 18) # DRS4 registers
+ADDR_PEDMEM_OFFSET = (8 << 18) # Pedestals memory
 
 
 class lappdInterface :
-    def __init__(self, ip = '10.0.6.193'):
+    def __init__(self, ip = '10.0.6.193', udpsport = 8989):
         self.xx = 0
         # self.brd = eevee.board('10.0.6.212', udpsport = 7778)
-        self.brd = eevee.board(ip) 
+        self.brd = eevee.board(ip, udpsport = udpsport) 
         self.peds = [0]*1024
         self.rmss = [0]*1024
         self.AdcSampleOffset = 12
@@ -148,7 +162,7 @@ class lappdInterface :
             raise Exception('Wrong ADC chip number : %d. Should be 0 or 1' %(nadc))
 
         # bit 10 in micaroblase addr space - select adc chip : 0 -- ADC-1, 1-- ADC-2
-        self.brd.pokenow(0x2000 | (nadc << 10) | (reg << 2), val)
+        self.brd.pokenow(ADDR_ADCSPI_OFFSET | (nadc << 10) | (reg << 2), val)
     
     def GetAdcReg(self, nadc, reg):
         if reg < 0 or reg > 0xff :
@@ -156,9 +170,9 @@ class lappdInterface :
         if nadc < 0 or nadc > 1 :
             raise Exception('Wrong ADC chip number : %d. Should be 0 or 1' %(nadc))
         if type(reg) != int : reg = int(reg,0)
-        self.brd.pokenow(0x2000, 2)
-        val = self.brd.peeknow(0x2000 | (nadc << 10) | (reg << 2))
-        self.brd.pokenow(0x2000, 0)
+        self.brd.pokenow(ADDR_ADCSPI_OFFSET, 2)
+        val = self.brd.peeknow(ADDR_ADCSPI_OFFSET | (nadc << 10) | (reg << 2))
+        self.brd.pokenow(ADDR_ADCSPI_OFFSET, 0)
         print(hex(val), file=sys.stderr)
         return val
 
@@ -201,7 +215,7 @@ class lappdInterface :
         val = 1 << C_CMD_ADCRESET_BIT
         self.RegWrite(CMD, val)
 
-    def AdcBufStart(self):
+    def AdcBufStart(self): # obsolete FIXME : remove
         val = 1 << C_CMD_ADCSTART_BIT
         self.RegWrite(CMD, val)
 
@@ -364,10 +378,10 @@ class lappdInterface :
         self.RegSetBit(MODE,C_MODE_DRS_TRANS_BIT,mode_on)
 
     def DrsSetConfigReg(self):
-        self.RegWrite(0x4000,0b11111111)
+        self.RegWrite(ADDR_DRSCFG_OFFSET,0b11111111)
 
     def DrsSetWriteReg(self):
-        self.RegWrite(0x4004,0xff)
+        self.RegWrite(ADDR_DRSCFG_OFFSET + 4,0xff)
 
     #####################################################
     # ADC buffer control
@@ -387,16 +401,16 @@ class lappdInterface :
 
         if fname != "" : filo = open(fname,"w+")
 
-        addr = 0x3000 + (1<<2)
+        addr = ADDR_ADCBUF_OFFSET + (1<<2)
         v = self.RegRead(addr)
         
         for i in range(0,num_words):
             # FIXME use multiple peek followed by transfer
-            # addr = 0x3000 + ((start_addr + i)<<2)
-            addr = 0x3000 
+            # addr = ADDR_ADCBUF_OFFSET + ((start_addr + i)<<2)
+            addr = ADDR_ADCBUF_OFFSET 
             v = self.RegRead(addr)
             # convert two's compliment to signed int
-            if v & (1<<11) != 0 : v = v - 0xfff
+            if v & (1<<11) != 0 : v = v - 0xfff - 1
             ret_val.append(v)
             if fname != "" : filo.write("%d %d\n" % (i, v))
         #self.AdcBufStart()
@@ -423,7 +437,7 @@ class lappdInterface :
 
     # initialize DAC
     def DacIni(self):
-        self.RegWrite(0x1000 | (0x4<<2),0x1ff)
+        self.RegWrite(ADDR_DAC_OFFSET | (0x4<<2),0x1ff)
 
     # set output voltage
     def DacSetVout(self, dac_chn, vout):
@@ -438,7 +452,7 @@ class lappdInterface :
         if dac_chn_i < 0 or dac_chn_i > 7 :
             raise Exception('ERROR:: Wrong DAC channel')
 
-        addr = 0x1000 | ((8 | dac_chn_i)<<2)
+        addr = ADDR_DAC_OFFSET | ((8 | dac_chn_i)<<2)
         val  = self.GetDacCode(vout)
         print('DAC out: %d addr: %s voltage: %f code: %s' % (dac_chn_i, hex(addr), vout, hex(val)), file=sys.stderr)
         self.RegWrite(addr, val)
@@ -451,16 +465,17 @@ class lappdInterface :
 
         # set output voltages TODO: don't hardcode values here
         self.DacSetVout(0,0.7)   # BIAS
-        self.DacSetVout(1,1.05)  # ROFS
-        #self.DacSetVout(2,1.3)   # OOFS
-        self.DacSetVout(3,1.2) # CMOFS
-        self.DacSetVout(4,1.05) #TCAL_N1
-        self.DacSetVout(5,1.05) #TCAL_N2
+        self.DacSetVout(1,1.0)  # ROFS
+        self.DacSetVout(2,1.3)   # OOFS
+        self.DacSetVout(3,0.7) # CMOFS
+        self.DacSetVout(4,0.5) #TCAL_N1
+        self.DacSetVout(5,0.5) #TCAL_N2
         
 
     # set all voltages to 0
     def DacClearAll(self) :
         for i in range(8) : self.DacSetVout(i,0)
+
         
 
     #####################################################
@@ -537,7 +552,7 @@ class lappdInterface :
         if fwver >= 100 and doCal : self.CalibrateIDelaysFrameAll()
         if doCal : self.CalibrateIDelaysDataAll()
 
-        # self.RegWrite(DRSREFCLKRATIO, self.drsrefclk)
+        self.RegWrite(DRSREFCLKRATIO, self.drsrefclk)
         # print("DRSREFCLKRATIO : %d" % (self.drsrefclk), file=sys.stderr)
 
         # initialize DRS-4 chips 
@@ -559,16 +574,17 @@ class lappdInterface :
 
         # tune SRCLK to ADCCLK phase
         if fwver >= 100 :
-            self.RegWrite(DRSVALIDDELAY, 28) # for the first sample extended
+            self.RegWrite(DRSVALIDDELAY, 36) # for the first sample extended
             self.RegWrite(DRSWAITADDR, 12) 
         else :
             # remove this once new version is stable
+            self.RegWrite(DRSREFCLKRATIO, self.drsrefclk)
             self.RegWrite(DRSVALIDDELAY,44)
             self.RegWrite(NSAMPLEPACKET, 512) # number of words in packet
 
-        # full readout mode
+        # ROI readout mode
         self.RegWrite(ADCBUFNUMWORDS,1024)
-        print('ROI waveform readout mode', file=sys.stderr)
+        print('ROI readout mode', file=sys.stderr)
         
         self.RegWrite(ADCCHANMASK_0  , self.mask_adc1)
         self.RegWrite(ADCCHANMASK_0+4, self.mask_adc2)
